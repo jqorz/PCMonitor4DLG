@@ -11,10 +11,11 @@ import oshi.hardware.GlobalMemory
 import oshi.hardware.HardwareAbstractionLayer
 
 class SystemMonitor {
-    private val si = SystemInfo()
-    private val hal: HardwareAbstractionLayer = si.hardware
-    private val processor: CentralProcessor = hal.processor
-    private val memory: GlobalMemory = hal.memory
+    // OSHI 硬件对象延迟到 IO 线程初始化，避免阻塞主线程
+    private lateinit var hal: HardwareAbstractionLayer
+    private lateinit var processor: CentralProcessor
+    private lateinit var memory: GlobalMemory
+    private var oshiInitialized = false
 
     private val _stats = MutableStateFlow(SystemStats())
     val stats: StateFlow<SystemStats> = _stats.asStateFlow()
@@ -23,26 +24,52 @@ class SystemMonitor {
     private var prevBytesSent = 0L
     private var prevBytesRecv = 0L
     private var prevTimestamp = 0L
-    private var prevCpuTicks: LongArray = processor.systemCpuLoadTicks
+    private lateinit var prevCpuTicks: LongArray
 
     // 缓存 nvidia-smi 路径
     private var nvidiaSmiPath: String? = null
     private var nvidiaSmiChecked = false
 
+    // GPU 检测结果缓存，避免每轮都阻塞等待
+    private var cachedGpuTemp = 0.0
+    private var cachedGpuUsage = 0.0
+    private var gpuReady = false
+
+    /**
+     * 初始化 OSHI（仅首次调用时执行，在 IO 线程中）
+     */
+    private fun ensureInitialized() {
+        if (oshiInitialized) return
+        val si = SystemInfo()
+        hal = si.hardware
+        processor = hal.processor
+        memory = hal.memory
+        prevCpuTicks = processor.systemCpuLoadTicks
+        oshiInitialized = true
+    }
+
     fun start(scope: CoroutineScope) {
         stop()
-        prevBytesSent = getTotalBytesSent()
-        prevBytesRecv = getTotalBytesRecv()
-        prevTimestamp = System.currentTimeMillis()
-        prevCpuTicks = processor.systemCpuLoadTicks
 
         job = scope.launch(Dispatchers.IO) {
-            delay(1000)
+            // 在 IO 线程中初始化 OSHI，不阻塞主线程
+            ensureInitialized()
+            prevBytesSent = getTotalBytesSent()
+            prevBytesRecv = getTotalBytesRecv()
+            prevTimestamp = System.currentTimeMillis()
+
+            // GPU 检测放到独立协程，不阻塞主循环
+            val gpuJob = launch {
+                detectGpuLoop()
+            }
+
+            // 主循环：立即开始采集 CPU/内存/网络，无需等待
             while (isActive) {
-                val stats = collectStats()
+                val stats = collectFastStats()
                 _stats.value = stats
                 delay(1000)
             }
+            gpuJob.cancel()
         }
     }
 
@@ -51,12 +78,13 @@ class SystemMonitor {
         job = null
     }
 
-    private fun collectStats(): SystemStats {
+    /**
+     * 快速采集 CPU/内存/网络（毫秒级），立即更新 UI
+     */
+    private fun collectFastStats(): SystemStats {
         val currentTicks = processor.systemCpuLoadTicks
         val cpuUsage = processor.getSystemCpuLoadBetweenTicks(prevCpuTicks) * 100.0
         prevCpuTicks = currentTicks
-
-        val (gpuTemp, gpuUsage) = getGpuInfo()
 
         val totalMem = memory.total
         val availMem = memory.available
@@ -76,13 +104,28 @@ class SystemMonitor {
 
         return SystemStats(
             cpuUsage = cpuUsage.coerceIn(0.0, 100.0),
-            gpuTemp = gpuTemp,
-            gpuUsage = gpuUsage,
+            gpuTemp = cachedGpuTemp,
+            gpuUsage = cachedGpuUsage,
             memUsage = memUsage,
             netUpSpeed = netUp.coerceAtLeast(0),
             netDownSpeed = netDown.coerceAtLeast(0),
             timestamp = currentTime
         )
+    }
+
+    /**
+     * GPU 异步检测循环，独立于主采集循环，完成后自动更新缓存
+     */
+    private suspend fun detectGpuLoop() {
+        while (true) {
+            try {
+                updateGpuCache()
+                gpuReady = true
+            } catch (_: CancellationException) {
+                throw CancellationException()
+            } catch (_: Exception) {}
+            delay(2000) // GPU 数据变化慢，2秒采一次即可
+        }
     }
 
     // jLibreHardwareMonitor 实例（延迟初始化，用于 GPU 信息）
@@ -121,68 +164,62 @@ class SystemMonitor {
     }
 
     /**
-     * 获取 GPU 信息（温度、负载）
+     * 检测 GPU 信息（温度、负载），结果直接写入缓存字段
+     * 优先尝试 nvidia-smi（快，~100ms），再尝试 jLibreHardwareMonitor（慢，1-3s）
      */
-    private fun getGpuInfo(): Pair<Double, Double> {
-        // 方法1: jLibreHardwareMonitor（需要管理员权限，最准确）
+    private fun updateGpuCache() {
+        // 方法1: nvidia-smi（最快，~100ms，NVIDIA GPU，同时查温度和占用率）
+        if (queryNvidiaGpu()) return
+
+        // 方法2: jLibreHardwareMonitor（需要管理员权限，首次加载慢）
         val gpuTemps = queryLhmSensors("GPU", "Temperature")
         val gpuLoads = queryLhmSensors("GPU", "Load")
 
         val gpuTemp = gpuTemps.firstOrNull { it in 1.0..150.0 } ?: 0.0
         val gpuUsage = gpuLoads.firstOrNull { it in 0.0..100.0 } ?: 0.0
 
-        if (gpuTemp > 0 || gpuUsage > 0) return Pair(gpuTemp, gpuUsage)
+        if (gpuTemp > 0 || gpuUsage > 0) {
+            cachedGpuTemp = gpuTemp
+            cachedGpuUsage = gpuUsage
+            return
+        }
 
-        // 方法2: nvidia-smi（NVIDIA GPU）
-        val nvidiaTemp = getNvidiaGpuTemp()
-        if (nvidiaTemp > 0) return Pair(nvidiaTemp, 0.0)
-
-        // 方法3: typeperf GPU Engine 占用率
-        val typeperfUsage = getTypeperfGpuUsage()
-        return Pair(0.0, typeperfUsage)
-    }
-
-    private fun getTypeperfGpuUsage(): Double {
-        try {
-            val p = Runtime.getRuntime().exec(arrayOf(
-                "cmd", "/c",
-                "typeperf \"\\GPU Engine(*)\\Utilization Percentage\" -sc 1 -y"
-            ))
-            val output = p.inputStream.bufferedReader().readText()
-            p.waitFor()
-            val lines = output.lines().filter { it.contains(",") && !it.startsWith("\"PDH") }
-            if (lines.size >= 2) {
-                val dataLine = lines.last()
-                val parts = dataLine.split(",").drop(2)
-                var total = 0.0
-                for (part in parts) {
-                    total += part.trim().trim('"').toDoubleOrNull() ?: 0.0
-                }
-                return total.coerceIn(0.0, 100.0)
-            }
-        } catch (_: Exception) {}
-        return 0.0
+        // 无可用 GPU 数据源
+        cachedGpuTemp = 0.0
+        cachedGpuUsage = 0.0
     }
 
     /**
-     * 通过 nvidia-smi 获取 NVIDIA GPU 温度
+     * 通过 nvidia-smi 同时获取 GPU 温度和占用率，成功返回 true
      */
-    private fun getNvidiaGpuTemp(): Double {
-        val smiPath = findNvidiaSmi() ?: return 0.0
+    private fun queryNvidiaGpu(): Boolean {
+        val smiPath = findNvidiaSmi() ?: return false
         try {
-            val p = Runtime.getRuntime().exec(arrayOf(smiPath, "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"))
+            val p = Runtime.getRuntime().exec(arrayOf(
+                smiPath,
+                "--query-gpu=temperature.gpu,utilization.gpu",
+                "--format=csv,noheader,nounits"
+            ))
             val output = p.inputStream.bufferedReader().readText().trim()
             p.waitFor()
-            return output.toDoubleOrNull() ?: 0.0
+            val parts = output.split(",")
+            if (parts.size >= 2) {
+                val temp = parts[0].trim().toDoubleOrNull() ?: 0.0
+                val usage = parts[1].trim().toDoubleOrNull() ?: 0.0
+                if (temp > 0 || usage > 0) {
+                    cachedGpuTemp = temp
+                    cachedGpuUsage = usage
+                    return true
+                }
+            }
         } catch (_: Exception) {}
-        return 0.0
+        return false
     }
 
     private fun findNvidiaSmi(): String? {
         if (nvidiaSmiChecked) return nvidiaSmiPath
         nvidiaSmiChecked = true
 
-        // 常见路径
         val candidates = listOf(
             "nvidia-smi",
             "C:\\Windows\\System32\\nvidia-smi.exe",
