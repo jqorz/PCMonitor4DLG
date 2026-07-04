@@ -38,8 +38,8 @@ class MainViewModelImpl : MainViewModel {
         systemMonitor.start(scope)
     }
 
-    override fun startScan(filterDlg: Boolean) {
-        bleManager.startScan(scope, filterDlg)
+    override fun startScan() {
+        bleManager.startScan(scope)
     }
 
     override fun stopScan() {

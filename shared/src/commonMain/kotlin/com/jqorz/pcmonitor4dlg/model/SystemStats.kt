@@ -1,7 +1,6 @@
 package com.jqorz.pcmonitor4dlg.model
 
 data class SystemStats(
-    val cpuTemp: Double = 0.0,
     val cpuUsage: Double = 0.0,
     val gpuTemp: Double = 0.0,
     val gpuUsage: Double = 0.0,

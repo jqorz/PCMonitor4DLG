@@ -27,9 +27,7 @@ class BleManager {
         val LONG_VALUE_UUID: GUID = GUID.fromString("0000ff01-0000-1000-8000-00805f9b34fb")
 
         private const val ERROR_SUCCESS = 0
-        // BTH_LE_GATT_SERVICE 结构体大小: GUID(16) + Short(2) + Short(2) = 20
         private const val SERVICE_STRUCT_SIZE = 20
-        // BTH_LE_GATT_CHARACTERISTIC 结构体大小: GUID(16) + Short(2) + Short(2) + Short(2) = 22
         private const val CHAR_STRUCT_SIZE = 22
     }
 
@@ -51,17 +49,25 @@ class BleManager {
     private var longValueAttrHandle: Short = 0
     private var ctrlPointAttrHandle: Short = 0
 
-    fun startScan(scope: CoroutineScope, filterDlg: Boolean = true) {
+    fun startScan(scope: CoroutineScope) {
         stopScan()
         _connectionState.value = BleConnectionState.SCANNING
         _scannedDevices.value = emptyList()
         addLog("开始扫描蓝牙设备...")
 
         scanJob = scope.launch(Dispatchers.IO) {
-            val devices = scanBluetoothDevices(filterDlg)
-            _scannedDevices.value = devices
-            _connectionState.value = BleConnectionState.DISCONNECTED
-            addLog("扫描完成，找到 ${devices.size} 个设备")
+            try {
+                val startTime = System.currentTimeMillis()
+                val devices = scanBluetoothDevices()
+                val elapsed = System.currentTimeMillis() - startTime
+                if (elapsed < 2000) delay(2000 - elapsed)
+                _scannedDevices.value = devices
+                addLog("扫描完成，找到 ${devices.size} 个设备")
+            } catch (e: Exception) {
+                addLog("扫描失败: ${e.message}")
+            } finally {
+                _connectionState.value = BleConnectionState.DISCONNECTED
+            }
         }
     }
 
@@ -88,7 +94,6 @@ class BleManager {
                     return@launch
                 }
 
-                // 打开 GATT 设备
                 val addrMem = Memory(8)
                 addrMem.write(0, addressBytes, 0, 6)
                 addrMem.setByte(6, 0)
@@ -106,7 +111,6 @@ class BleManager {
                 _connectionState.value = BleConnectionState.CONNECTED
                 addLog("已连接，正在发现服务...")
 
-                // 发现服务
                 val serviceCount = IntByReference()
                 val result = BluetoothGattApi.INSTANCE.BluetoothGATTGetServices(
                     gattHandle!!, 0, null, serviceCount, 0
@@ -128,7 +132,6 @@ class BleManager {
                     return@launch
                 }
 
-                // 查找目标服务
                 var serviceOffset = 0L
                 var foundService = false
                 for (i in 0 until serviceCount.value) {
@@ -184,7 +187,7 @@ class BleManager {
         var offset = 0L
         for (i in 0 until charCount.value) {
             val charUuid = GUID(charsBuf.share(offset))
-            val valueHandle = charsBuf.getShort(offset + 20) // valueHandle 在结构体末尾
+            val valueHandle = charsBuf.getShort(offset + 20)
 
             if (charUuid == LONG_VALUE_UUID) {
                 longValueAttrHandle = valueHandle
@@ -254,11 +257,10 @@ class BleManager {
                         val stats = statsProvider()
                         val buf = ByteArray(20)
                         buf[0] = 0x93.toByte()
-                        buf[1] = stats.cpuTemp.toInt().toByte()
-                        buf[2] = stats.cpuUsage.toInt().toByte()
-                        buf[3] = stats.gpuTemp.toInt().toByte()
-                        buf[4] = stats.gpuUsage.toInt().toByte()
-                        buf[5] = stats.memUsage.toInt().toByte()
+                        buf[1] = stats.cpuUsage.toInt().toByte()
+                        buf[2] = stats.gpuTemp.toInt().toByte()
+                        buf[3] = stats.gpuUsage.toInt().toByte()
+                        buf[4] = stats.memUsage.toInt().toByte()
                         val upKB = (stats.netUpSpeed / 1024).toInt().coerceIn(0, 65535)
                         val downKB = (stats.netDownSpeed / 1024).toInt().coerceIn(0, 65535)
                         buf[6] = (upKB and 0xFF).toByte()
@@ -319,43 +321,118 @@ class BleManager {
         _logs.value = _logs.value + "[$timestamp] $msg"
     }
 
-    private fun scanBluetoothDevices(filterDlg: Boolean): List<BleDeviceInfo> {
+    /**
+     * 从 CharArray 提取 null 结尾的字符串
+     */
+    private fun charArrayToString(chars: CharArray): String {
+        val sb = StringBuilder()
+        for (c in chars) {
+            if (c == ' ') break
+            sb.append(c)
+        }
+        return sb.toString().trim()
+    }
+
+    private fun scanBluetoothDevices(): List<BleDeviceInfo> {
         val devices = mutableListOf<BleDeviceInfo>()
+
+        // 使用 Python bleak 库扫描 BLE 设备（包括未配对的广播设备）
         try {
-            val searchParams = BLUETOOTH_DEVICE_SEARCH_PARAMS()
-            searchParams.dwSize = searchParams.size()
-            searchParams.fReturnAuthenticated = true
-            searchParams.fReturnRemembered = true
-            searchParams.fReturnUnknown = true
-            searchParams.fReturnConnected = true
-            searchParams.fIssueInquiry = true
-            searchParams.cTimeoutMultiplier = 2
+            addLog("正在搜索附近蓝牙设备 (Python bleak)...")
+            val scriptFile = java.io.File.createTempFile("ble_scan_", ".py")
+            scriptFile.writeText(
+                "import sys, asyncio\n" +
+                "from bleak import BleakScanner\n" +
+                "async def scan(timeout):\n" +
+                "    devices = await BleakScanner.discover(timeout=timeout)\n" +
+                "    for d in devices:\n" +
+                "        name = d.name if d.name else ''\n" +
+                "        addr = d.address if d.address else ''\n" +
+                "        print(f'{name}|{addr}')\n" +
+                "if __name__ == '__main__':\n" +
+                "    t = int(sys.argv[1]) if len(sys.argv) > 1 else 10\n" +
+                "    asyncio.run(scan(t))\n"
+            )
+            scriptFile.deleteOnExit()
 
-            val deviceInfo = BLUETOOTH_DEVICE_INFO()
-            deviceInfo.dwSize = deviceInfo.size()
+            val p = Runtime.getRuntime().exec(arrayOf("python", scriptFile.absolutePath, "10"))
+            val output = p.inputStream.bufferedReader(charset("UTF-8")).readText()
+            p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+            scriptFile.delete()
 
-            val findHandle = BluetoothApis.INSTANCE.BluetoothFindFirstDevice(searchParams, deviceInfo)
+            addLog("扫描到 ${output.lines().filter { it.isNotBlank() }.size} 个 BLE 设备")
 
-            if (findHandle != null && findHandle != Pointer.NULL) {
-                do {
-                    val name = String(deviceInfo.szName).trim(' ')
-                    val addr = deviceInfo.address.rgBytes
-                    val address = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                        addr[5], addr[4], addr[3], addr[2], addr[1], addr[0])
-
-                    if (!filterDlg || name.startsWith("DLG", ignoreCase = true)) {
+            for (line in output.lines()) {
+                val trimmed = line.trim()
+                if (trimmed.isEmpty()) continue
+                val parts = trimmed.split("|", limit = 2)
+                if (parts.size >= 2) {
+                    val name = parts[0].trim()
+                    val address = parts[1].trim()
+                    if (address.isNotEmpty()) {
+                        addLog("BLE: name='$name' addr=$address")
                         devices.add(BleDeviceInfo(name, address))
                     }
-
-                    deviceInfo.dwSize = deviceInfo.size()
-                } while (BluetoothApis.INSTANCE.BluetoothFindNextDevice(findHandle, deviceInfo))
-
-                BluetoothApis.INSTANCE.BluetoothFindDeviceClose(findHandle)
+                }
             }
         } catch (e: Exception) {
-            addLog("扫描异常: ${e.message}")
+            addLog("BLE 扫描异常: ${e.message}")
         }
+
+        // 回退: Get-PnpDevice 列出已配对设备
+        if (devices.isEmpty()) {
+            try {
+                addLog("回退到 Get-PnpDevice...")
+                val scriptFile = java.io.File.createTempFile("bt_pnp_", ".ps1")
+                scriptFile.writeText(buildString {
+                    appendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8")
+                    appendLine("Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue | ForEach-Object {")
+                    appendLine("  Write-Output (\$_.FriendlyName + '|' + \$_.InstanceId)")
+                    appendLine("}")
+                })
+                scriptFile.deleteOnExit()
+
+                val p = Runtime.getRuntime().exec(arrayOf(
+                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptFile.absolutePath
+                ))
+                val output = p.inputStream.bufferedReader(charset("UTF-8")).readText()
+                p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+                scriptFile.delete()
+
+                for (line in output.lines()) {
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty()) continue
+                    val parts = trimmed.split("|", limit = 2)
+                    if (parts.size >= 2) {
+                        val name = parts[0].trim()
+                        val address = extractBluetoothAddress(parts[1].trim())
+                        if (name.isNotEmpty()) {
+                            addLog("PnP: name='$name' addr=$address")
+                            devices.add(BleDeviceInfo(name, address))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("PnP 扫描异常: ${e.message}")
+            }
+        }
+
         return devices
+    }
+
+    private fun extractBluetoothAddress(instanceId: String): String {
+        return try {
+            val btPart = instanceId.split("\\").getOrNull(1) ?: return ""
+            val addrRaw = btPart.removePrefix("Dev_").removePrefix("DEV_").take(12)
+            if (addrRaw.length == 12) {
+                String.format("%s:%s:%s:%s:%s:%s",
+                    addrRaw.substring(0, 2), addrRaw.substring(2, 4),
+                    addrRaw.substring(4, 6), addrRaw.substring(6, 8),
+                    addrRaw.substring(8, 10), addrRaw.substring(10, 12))
+            } else ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun parseBluetoothAddress(address: String): ByteArray? {

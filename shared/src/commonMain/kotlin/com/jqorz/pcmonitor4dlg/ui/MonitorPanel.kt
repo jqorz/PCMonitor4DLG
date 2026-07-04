@@ -6,15 +6,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jqorz.pcmonitor4dlg.model.SystemStats
-import java.text.SimpleDateFormat
-import java.util.*
 
 @Composable
 fun MonitorPanel(stats: SystemStats, modifier: Modifier = Modifier) {
@@ -22,13 +19,13 @@ fun MonitorPanel(stats: SystemStats, modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxWidth().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // CPU 行
+        // CPU + 内存
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            MonitorCard("CPU 温度", String.format("%.0f°C", stats.cpuTemp), Modifier.weight(1f))
             MonitorCard("CPU 占用", String.format("%.1f%%", stats.cpuUsage), Modifier.weight(1f))
+            MonitorCard("内存占用", String.format("%.1f%%", stats.memUsage), Modifier.weight(1f))
         }
 
         // GPU 行
@@ -39,9 +36,6 @@ fun MonitorPanel(stats: SystemStats, modifier: Modifier = Modifier) {
             MonitorCard("GPU 温度", String.format("%.0f°C", stats.gpuTemp), Modifier.weight(1f))
             MonitorCard("GPU 占用", String.format("%.1f%%", stats.gpuUsage), Modifier.weight(1f))
         }
-
-        // 内存
-        MonitorCard("内存占用", String.format("%.1f%%", stats.memUsage))
 
         // 网速
         Row(

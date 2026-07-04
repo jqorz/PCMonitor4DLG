@@ -22,7 +22,7 @@ interface MainViewModel {
     val showExitDialog: StateFlow<Boolean>
 
     // Actions
-    fun startScan(filterDlg: Boolean = true)
+    fun startScan()
     fun stopScan()
     fun connectDevice(device: BleDeviceInfo)
     fun disconnectDevice()

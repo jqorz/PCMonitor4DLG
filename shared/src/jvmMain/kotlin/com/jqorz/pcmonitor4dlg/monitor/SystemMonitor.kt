@@ -56,7 +56,6 @@ class SystemMonitor {
         val cpuUsage = processor.getSystemCpuLoadBetweenTicks(prevCpuTicks) * 100.0
         prevCpuTicks = currentTicks
 
-        val cpuTemp = getCpuTemperature()
         val (gpuTemp, gpuUsage) = getGpuInfo()
 
         val totalMem = memory.total
@@ -76,7 +75,6 @@ class SystemMonitor {
         prevTimestamp = currentTime
 
         return SystemStats(
-            cpuTemp = cpuTemp,
             cpuUsage = cpuUsage.coerceIn(0.0, 100.0),
             gpuTemp = gpuTemp,
             gpuUsage = gpuUsage,
@@ -87,52 +85,9 @@ class SystemMonitor {
         )
     }
 
-    // jLibreHardwareMonitor 实例（延迟初始化）
+    // jLibreHardwareMonitor 实例（延迟初始化，用于 GPU 信息）
     private var lhmManager: Any? = null
     private var lhmFailed = false
-
-    /**
-     * 通过 jLibreHardwareMonitor 获取 CPU 温度
-     * 注意：需要管理员权限，否则返回 0
-     */
-    private fun getCpuTemperature(): Double {
-        // 方法1: jLibreHardwareMonitor（需要管理员权限）
-        if (!lhmFailed) {
-            try {
-                if (lhmManager == null) {
-                    val configClass = Class.forName("io.github.pandalxb.jlibrehardwaremonitor.config.ComputerConfig")
-                    val config = configClass.getMethod("getInstance").invoke(null)
-                    config.javaClass.getMethod("setCpuEnabled", Boolean::class.javaPrimitiveType).invoke(config, true)
-                    config.javaClass.getMethod("setGpuEnabled", Boolean::class.javaPrimitiveType).invoke(config, true)
-
-                    val managerClass = Class.forName("io.github.pandalxb.jlibrehardwaremonitor.manager.LibreHardwareManager")
-                    lhmManager = managerClass.getMethod("createInstance", configClass).invoke(null, config)
-                }
-
-                val manager = lhmManager!!
-                val querySensors = manager.javaClass.getMethod("querySensors", String::class.java, String::class.java)
-
-                // 查询 CPU 温度
-                val cpuSensors = querySensors.invoke(manager, "CPU", "Temperature") as? List<*>
-                if (cpuSensors != null) {
-                    for (sensor in cpuSensors) {
-                        if (sensor == null) continue
-                        val value = sensor.javaClass.getMethod("getValue").invoke(sensor) as? Number
-                        val temp = value?.toDouble() ?: 0.0
-                        if (temp > 0 && temp < 150) return temp
-                    }
-                }
-            } catch (e: Exception) {
-                lhmFailed = true
-            }
-        }
-
-        // 方法2: OSHI sensors（回退，也需要管理员权限）
-        val oshiTemp = hal.sensors.cpuTemperature
-        if (oshiTemp > 0 && oshiTemp < 150) return oshiTemp
-
-        return 0.0
-    }
 
     private fun getTotalBytesSent(): Long = hal.networkIFs.sumOf { it.bytesSent }
     private fun getTotalBytesRecv(): Long = hal.networkIFs.sumOf { it.bytesRecv }
