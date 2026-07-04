@@ -8,6 +8,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 
 class MainViewModelImpl : MainViewModel {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -36,6 +37,15 @@ class MainViewModelImpl : MainViewModel {
 
     init {
         systemMonitor.start(scope)
+
+        // Auto-start data sync when BLE service becomes ready
+        scope.launch {
+            bleManager.connectionState.collectLatest { state ->
+                if (state == BleConnectionState.SERVICE_READY) {
+                    bleManager.startDataSync(scope) { systemMonitor.stats.value }
+                }
+            }
+        }
     }
 
     override fun startScan() {
