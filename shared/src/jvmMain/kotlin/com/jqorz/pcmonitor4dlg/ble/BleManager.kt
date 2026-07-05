@@ -280,6 +280,58 @@ class BleManager {
         }
     }
 
+    /**
+     * 通过 MAC 地址直接连接设备，用于自动重连场景。
+     * 连接成功后设备名称会从响应中获取。
+     */
+    fun connectByAddress(scope: CoroutineScope, address: String) {
+        disconnect()
+        _connectionState.value = BleConnectionState.CONNECTING
+        _connectedDeviceName.value = address
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (!ensureServiceRunning()) {
+                    _connectionState.value = BleConnectionState.DISCONNECTED
+                    return@launch
+                }
+
+                val resp = sendCommand("""{"cmd":"connect","address":"$address"}""")
+
+                if (resp == null) {
+                    _connectionState.value = BleConnectionState.DISCONNECTED
+                    return@launch
+                }
+
+                val ok = jsonGetBool(resp, "ok") ?: false
+                if (!ok) {
+                    _connectionState.value = BleConnectionState.DISCONNECTED
+                    return@launch
+                }
+
+                // 尝试从响应中获取设备名称
+                val devName = jsonGetString(resp, "name")
+                if (!devName.isNullOrEmpty()) {
+                    _connectedDeviceName.value = devName
+                }
+
+                _connectionState.value = BleConnectionState.CONNECTED
+
+                val charsMap = jsonParseCharsMap(resp)
+                for ((uuid, handle) in charsMap) {
+                    when (uuid.lowercase()) {
+                        LONG_VALUE_UUID -> longValueAttrHandle = handle
+                        CTRL_POINT_UUID -> ctrlPointAttrHandle = handle
+                    }
+                }
+
+                _connectionState.value = BleConnectionState.SERVICE_READY
+            } catch (_: Exception) {
+                _connectionState.value = BleConnectionState.DISCONNECTED
+            }
+        }
+    }
+
     // ---- Data sync ----
 
     fun startDataSync(scope: CoroutineScope, statsProvider: () -> SystemStats) {

@@ -27,9 +27,7 @@ fun main() {
     println("[DEBUG] main() 启动")
     val viewModel = createMainViewModel() as MainViewModelImpl
     println("[DEBUG] viewModel 创建完成")
-    val settings = viewModel.settings.value
-
-    var isWindowVisible by mutableStateOf(!settings.minimizeOnStartup)
+    var isWindowVisible by mutableStateOf(false)
     var shouldExit by mutableStateOf(false)
     var awtWindow by mutableStateOf<java.awt.Window?>(null)
 

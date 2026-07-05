@@ -10,7 +10,8 @@ import java.util.prefs.Preferences
 class SettingsManager {
     companion object {
         private const val KEY_AUTO_START = "auto_start_on_boot"
-        private const val KEY_MINIMIZE_ON_STARTUP = "minimize_on_startup"
+        private const val KEY_AUTO_CONNECT_LAST_DEVICE = "auto_connect_last_device"
+        private const val KEY_LAST_DEVICE_ADDRESS = "last_device_address"
         private const val KEY_EXIT_ACTION = "exit_action"
         private const val REG_RUN_PATH = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
         private const val APP_NAME = "PCMonitor4DLG"
@@ -24,7 +25,7 @@ class SettingsManager {
     private fun loadSettings(): AppSettings {
         return AppSettings(
             autoStartOnBoot = prefs.getBoolean(KEY_AUTO_START, false),
-            minimizeOnStartup = prefs.getBoolean(KEY_MINIMIZE_ON_STARTUP, false),
+            autoConnectLastDevice = prefs.getBoolean(KEY_AUTO_CONNECT_LAST_DEVICE, false),
             exitAction = ExitAction.entries[prefs.getInt(KEY_EXIT_ACTION, ExitAction.ASK.ordinal)]
         )
     }
@@ -35,9 +36,18 @@ class SettingsManager {
         _settings.value = _settings.value.copy(autoStartOnBoot = enabled)
     }
 
-    fun updateMinimizeOnStartup(enabled: Boolean) {
-        prefs.putBoolean(KEY_MINIMIZE_ON_STARTUP, enabled)
-        _settings.value = _settings.value.copy(minimizeOnStartup = enabled)
+    fun updateAutoConnectLastDevice(enabled: Boolean) {
+        prefs.putBoolean(KEY_AUTO_CONNECT_LAST_DEVICE, enabled)
+        _settings.value = _settings.value.copy(autoConnectLastDevice = enabled)
+    }
+
+    fun getLastDeviceAddress(): String? {
+        val addr = prefs.get(KEY_LAST_DEVICE_ADDRESS, "")
+        return if (addr == null || addr == "") null else addr
+    }
+
+    fun saveLastDeviceAddress(address: String) {
+        prefs.put(KEY_LAST_DEVICE_ADDRESS, address)
     }
 
     fun updateExitAction(action: ExitAction) {

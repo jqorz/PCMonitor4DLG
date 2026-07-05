@@ -29,7 +29,7 @@ interface MainViewModel {
     fun clearBleLog()
 
     fun updateAutoStart(enabled: Boolean)
-    fun updateMinimizeOnStartup(enabled: Boolean)
+    fun updateAutoConnectLastDevice(enabled: Boolean)
     fun updateExitAction(action: ExitAction)
 
     fun setShowSettingsDialog(show: Boolean)

@@ -111,7 +111,7 @@ fun App(
             SettingsDialog(
                 settings = settings,
                 onAutoStartChanged = { viewModel.updateAutoStart(it) },
-                onMinimizeOnStartupChanged = { viewModel.updateMinimizeOnStartup(it) },
+                onAutoConnectLastDeviceChanged = { viewModel.updateAutoConnectLastDevice(it) },
                 onDismiss = { viewModel.setShowSettingsDialog(false) }
             )
         }

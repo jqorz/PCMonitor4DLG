@@ -14,7 +14,7 @@ import com.jqorz.pcmonitor4dlg.model.AppSettings
 fun SettingsDialog(
     settings: AppSettings,
     onAutoStartChanged: (Boolean) -> Unit,
-    onMinimizeOnStartupChanged: (Boolean) -> Unit,
+    onAutoConnectLastDeviceChanged: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -42,12 +42,12 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // 启动后最小化
+                // 自动连接上次设备
                 SettingSwitch(
-                    label = "启动后最小化到任务栏",
-                    description = "应用启动时不显示主窗口，直接最小化到系统托盘",
-                    checked = settings.minimizeOnStartup,
-                    onCheckedChange = onMinimizeOnStartupChanged
+                    label = "启动时自动连接设备",
+                    description = "应用启动后自动尝试连接上一次连接成功的设备，每隔30秒重试直到成功",
+                    checked = settings.autoConnectLastDevice,
+                    onCheckedChange = onAutoConnectLastDeviceChanged
                 )
             }
         },

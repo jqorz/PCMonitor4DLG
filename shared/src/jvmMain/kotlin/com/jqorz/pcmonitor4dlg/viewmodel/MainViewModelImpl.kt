@@ -35,6 +35,9 @@ class MainViewModelImpl : MainViewModel {
     private val _showExitDialog = MutableStateFlow(false)
     override val showExitDialog: StateFlow<Boolean> = _showExitDialog.asStateFlow()
 
+    private var autoConnectJob: Job? = null
+    private var pendingConnectAddress: String? = null
+
     init {
         systemMonitor.start(scope)
 
@@ -43,6 +46,57 @@ class MainViewModelImpl : MainViewModel {
             bleManager.connectionState.collectLatest { state ->
                 if (state == BleConnectionState.SERVICE_READY) {
                     bleManager.startDataSync(scope) { systemMonitor.stats.value }
+                }
+            }
+        }
+
+        // Save last device address on successful connection
+        scope.launch {
+            bleManager.connectionState.collectLatest { state ->
+                if (state == BleConnectionState.SERVICE_READY) {
+                    val addr = pendingConnectAddress
+                    if (addr != null) {
+                        settingsManager.saveLastDeviceAddress(addr)
+                        pendingConnectAddress = null
+                    }
+                }
+            }
+        }
+
+        // Auto-connect to last device on startup
+        startAutoConnectIfNeeded()
+    }
+
+    private fun startAutoConnectIfNeeded() {
+        autoConnectJob?.cancel()
+        if (!settings.value.autoConnectLastDevice) return
+        val lastAddr = settingsManager.getLastDeviceAddress() ?: return
+
+        autoConnectJob = scope.launch {
+            while (isActive && settings.value.autoConnectLastDevice) {
+                if (bleManager.connectionState.value == BleConnectionState.DISCONNECTED) {
+                    pendingConnectAddress = lastAddr
+                    bleManager.connectByAddress(scope, lastAddr)
+                }
+                // 等待连接结果或30秒后重试
+                val startTime = System.currentTimeMillis()
+                while (isActive) {
+                    delay(500)
+                    val state = bleManager.connectionState.value
+                    if (state == BleConnectionState.SERVICE_READY) {
+                        // 连接成功，停止自动重连
+                        return@launch
+                    }
+                    if (state == BleConnectionState.DISCONNECTED &&
+                        System.currentTimeMillis() - startTime >= 30000
+                    ) {
+                        // 连接失败，30秒后重试
+                        break
+                    }
+                    if (!settings.value.autoConnectLastDevice) {
+                        // 设置已关闭，停止自动重连
+                        return@launch
+                    }
                 }
             }
         }
@@ -57,6 +111,7 @@ class MainViewModelImpl : MainViewModel {
     }
 
     override fun connectDevice(device: BleDeviceInfo) {
+        pendingConnectAddress = device.address
         bleManager.connect(scope, device)
     }
 
@@ -72,8 +127,14 @@ class MainViewModelImpl : MainViewModel {
         settingsManager.updateAutoStart(enabled)
     }
 
-    override fun updateMinimizeOnStartup(enabled: Boolean) {
-        settingsManager.updateMinimizeOnStartup(enabled)
+    override fun updateAutoConnectLastDevice(enabled: Boolean) {
+        settingsManager.updateAutoConnectLastDevice(enabled)
+        if (enabled) {
+            startAutoConnectIfNeeded()
+        } else {
+            autoConnectJob?.cancel()
+            autoConnectJob = null
+        }
     }
 
     override fun updateExitAction(action: ExitAction) {
