@@ -35,6 +35,7 @@ class SystemMonitor {
     private var cachedGpuUsage = 0.0
     private var gpuReady = false
 
+
     /**
      * 初始化 OSHI（仅首次调用时执行，在 IO 线程中）
      */
@@ -132,8 +133,17 @@ class SystemMonitor {
     private var lhmManager: Any? = null
     private var lhmFailed = false
 
-    private fun getTotalBytesSent(): Long = hal.networkIFs.sumOf { it.bytesSent }
-    private fun getTotalBytesRecv(): Long = hal.networkIFs.sumOf { it.bytesRecv }
+    private fun getTotalBytesSent(): Long {
+        var total = 0L
+        for (nif in hal.networkIFs) total += nif.bytesSent
+        return total
+    }
+
+    private fun getTotalBytesRecv(): Long {
+        var total = 0L
+        for (nif in hal.networkIFs) total += nif.bytesRecv
+        return total
+    }
 
     /**
      * 通过 jLibreHardwareManager 查询指定硬件和传感器类型
@@ -194,13 +204,16 @@ class SystemMonitor {
      */
     private fun queryNvidiaGpu(): Boolean {
         val smiPath = findNvidiaSmi() ?: return false
+        var p: Process? = null
         try {
-            val p = Runtime.getRuntime().exec(arrayOf(
+            p = Runtime.getRuntime().exec(arrayOf(
                 smiPath,
                 "--query-gpu=temperature.gpu,utilization.gpu",
                 "--format=csv,noheader,nounits"
             ))
-            val output = p.inputStream.bufferedReader().readText().trim()
+            val reader = p.inputStream.bufferedReader()
+            val output = reader.readText().trim()
+            reader.close()
             p.waitFor()
             val parts = output.split(",")
             if (parts.size >= 2) {
@@ -212,7 +225,9 @@ class SystemMonitor {
                     return true
                 }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {} finally {
+            p?.destroy()
+        }
         return false
     }
 
@@ -220,20 +235,25 @@ class SystemMonitor {
         if (nvidiaSmiChecked) return nvidiaSmiPath
         nvidiaSmiChecked = true
 
-        val candidates = listOf(
+        val candidates = java.util.Arrays.asList(
             "nvidia-smi",
             "C:\\Windows\\System32\\nvidia-smi.exe",
             "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"
         )
         for (path in candidates) {
+            var p: Process? = null
             try {
-                val p = Runtime.getRuntime().exec(arrayOf(path, "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"))
+                p = Runtime.getRuntime().exec(arrayOf(path, "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"))
+                // 消耗输出流防止进程阻塞
+                java.io.BufferedReader(java.io.InputStreamReader(p.inputStream)).close()
                 p.waitFor()
                 if (p.exitValue() == 0) {
                     nvidiaSmiPath = path
                     return path
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {} finally {
+                p?.destroy()
+            }
         }
         return null
     }

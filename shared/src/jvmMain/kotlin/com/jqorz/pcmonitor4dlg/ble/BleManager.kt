@@ -18,7 +18,21 @@ class BleManager {
     companion object {
         private const val LONG_VALUE_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
         private const val CTRL_POINT_UUID = "0000ff03-0000-1000-8000-00805f9b34fb"
+        private const val MAX_LOG_ENTRIES = 200
+
+        // 预编译 Regex，避免每次调用重新编译
+        private val REGEX_JSON_STRING = Regex(""""(\w+)"\s*:\s*"([^"]*)"""")
+        private val REGEX_JSON_BOOL = Regex(""""(\w+)"\s*:\s*(true|false)""")
+        private val REGEX_DEVICE_ITEM = Regex("""\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*"address"\s*:\s*"([^"]*)"[^{}]*\}""")
+        private val REGEX_CHARS_SECTION = Regex(""""chars"\s*:\s*\{([^}]*)\}""")
+        private val REGEX_CHARS_ENTRY = Regex(""""([^"]+)"\s*:\s*(\d+)""")
+
+        // 缓存 Base64 编码器
+        private val BASE64_ENCODER = java.util.Base64.getEncoder()
     }
+
+    /** 日志开关，默认关闭以减少内存分配，需要调试时设为 true */
+    var logEnabled = false
 
     private val _connectionState = MutableStateFlow(BleConnectionState.DISCONNECTED)
     val connectionState: StateFlow<BleConnectionState> = _connectionState.asStateFlow()
@@ -31,6 +45,9 @@ class BleManager {
 
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
+
+    // 复用的写缓冲区，避免每秒分配 ByteArray
+    private val writeBuffer = ByteArray(12)
 
     private var scanJob: Job? = null
     private var syncJob: Job? = null
@@ -45,19 +62,23 @@ class BleManager {
     // ---- Minimal JSON helpers ----
 
     private fun jsonGetString(json: String, key: String): String? {
-        val pattern = Regex(""""$key"\s*:\s*"([^"]*)"""")
-        return pattern.find(json)?.groupValues?.get(1)
+        // 使用预编译 Regex，在整个 json 中查找 key 对应的值
+        for (m in REGEX_JSON_STRING.findAll(json)) {
+            if (m.groupValues[1] == key) return m.groupValues[2]
+        }
+        return null
     }
 
     private fun jsonGetBool(json: String, key: String): Boolean? {
-        val pattern = Regex(""""$key"\s*:\s*(true|false)""")
-        return pattern.find(json)?.groupValues?.get(1)?.toBoolean()
+        for (m in REGEX_JSON_BOOL.findAll(json)) {
+            if (m.groupValues[1] == key) return m.groupValues[2].toBoolean()
+        }
+        return null
     }
 
     private fun jsonParseDevices(json: String): List<BleDeviceInfo> {
         val devices = mutableListOf<BleDeviceInfo>()
-        val itemPattern = Regex("""\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*"address"\s*:\s*"([^"]*)"[^{}]*\}""")
-        for (m in itemPattern.findAll(json)) {
+        for (m in REGEX_DEVICE_ITEM.findAll(json)) {
             val name = m.groupValues[1]
             val address = m.groupValues[2]
             if (address.isNotEmpty()) {
@@ -69,9 +90,8 @@ class BleManager {
 
     private fun jsonParseCharsMap(json: String): Map<String, Int> {
         val result = mutableMapOf<String, Int>()
-        val charsSection = Regex(""""chars"\s*:\s*\{([^}]*)\}""").find(json)?.groupValues?.get(1) ?: return result
-        val entryPattern = Regex(""""([^"]+)"\s*:\s*(\d+)""")
-        for (m in entryPattern.findAll(charsSection)) {
+        val charsSection = REGEX_CHARS_SECTION.find(json)?.groupValues?.get(1) ?: return result
+        for (m in REGEX_CHARS_ENTRY.findAll(charsSection)) {
             result[m.groupValues[1]] = m.groupValues[2].toInt()
         }
         return result
@@ -270,13 +290,13 @@ class BleManager {
                     try {
                         val stats = statsProvider()
                         // 文档协议: Control Point (0xFF03), 命令字 0xB0, 12字节
-                        val buf = ByteArray(12)
-                        buf[0] = 0xB0.toByte()
-                        buf[1] = stats.cpuUsage.toInt().toByte()
-                        buf[2] = stats.memUsage.toInt().toByte()
-                        buf[3] = stats.gpuTemp.toInt().toByte()
-                        buf[4] = stats.gpuUsage.toInt().toByte()
-                        writeCharacteristic(ctrlPointAttrHandle, buf)
+                        // 复用 writeBuffer，避免每秒分配新 ByteArray
+                        writeBuffer[0] = 0xB0.toByte()
+                        writeBuffer[1] = stats.cpuUsage.toInt().toByte()
+                        writeBuffer[2] = stats.memUsage.toInt().toByte()
+                        writeBuffer[3] = stats.gpuTemp.toInt().toByte()
+                        writeBuffer[4] = stats.gpuUsage.toInt().toByte()
+                        writeCharacteristic(ctrlPointAttrHandle, writeBuffer)
                     } catch (_: Exception) {
                     }
                 }
@@ -294,7 +314,7 @@ class BleManager {
 
     private fun writeCharacteristic(handle: Int, data: ByteArray) {
         if (handle == 0) return
-        val dataB64 = Base64.getEncoder().encodeToString(data)
+        val dataB64 = BASE64_ENCODER.encodeToString(data)
         sendCommand("""{"cmd":"write","handle":$handle,"data":"$dataB64"}""")
     }
 
@@ -321,11 +341,19 @@ class BleManager {
     }
 
     private fun addLog(msg: String) {
+        if (!logEnabled) return
         val now = Calendar.getInstance()
         val timestamp = String.format("%02d:%02d:%02d",
             now.get(Calendar.HOUR_OF_DAY),
             now.get(Calendar.MINUTE),
             now.get(Calendar.SECOND))
-        _logs.value = _logs.value + "[$timestamp] $msg"
+        val newEntry = "[$timestamp] $msg"
+        val updated = java.util.ArrayList(_logs.value)
+        // 限制日志条数，超出时丢弃最旧的
+        if (updated.size >= MAX_LOG_ENTRIES) {
+            updated.subList(0, updated.size - MAX_LOG_ENTRIES + 1).clear()
+        }
+        updated.add(newEntry)
+        _logs.value = updated
     }
 }

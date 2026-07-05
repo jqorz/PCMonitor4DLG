@@ -69,9 +69,14 @@ class TrayManager(
     }
 
     private fun showCustomMenu() {
-        popupDialog?.dispose()
-
+        val dialog = popupDialog ?: createPopupDialog()
         val mouseLoc = MouseInfo.getPointerInfo().location
+        dialog.setLocation(mouseLoc.x - dialog.width, mouseLoc.y - dialog.height)
+        dialog.isVisible = true
+        dialog.requestFocus()
+    }
+
+    private fun createPopupDialog(): JFrame {
         val font = Font("Microsoft YaHei", Font.PLAIN, 13)
         val hoverColor = Color(0xE8, 0xE8, 0xE8)
         val textColor = Color(0x33, 0x33, 0x33)
@@ -114,7 +119,7 @@ class TrayManager(
                     item.repaint()
                 }
                 override fun mousePressed(e: MouseEvent) {
-                    dialog.dispose()
+                    dialog.isVisible = false
                     onClick()
                 }
             })
@@ -138,19 +143,15 @@ class TrayManager(
         dialog.contentPane = panel
         dialog.pack()
 
-        // 右下角对齐鼠标
-        dialog.setLocation(mouseLoc.x - dialog.width, mouseLoc.y - dialog.height)
-
-        // 失焦自动关闭
+        // 失焦自动隐藏（而非 dispose，复用实例）
         dialog.addWindowFocusListener(object : WindowAdapter() {
             override fun windowLostFocus(e: WindowEvent) {
-                dialog.dispose()
+                dialog.isVisible = false
             }
         })
 
-        dialog.isVisible = true
-        dialog.requestFocus()
         popupDialog = dialog
+        return dialog
     }
 
     fun showNotification(title: String, message: String, type: TrayIcon.MessageType = TrayIcon.MessageType.INFO) {
