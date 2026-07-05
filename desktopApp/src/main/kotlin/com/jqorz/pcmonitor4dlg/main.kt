@@ -18,7 +18,15 @@ import com.jqorz.pcmonitor4dlg.viewmodel.createMainViewModel
 import org.jetbrains.skia.Image
 
 fun main() {
+    // 全局未捕获异常处理，防止静默退出
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+        System.err.println("[FATAL] Uncaught exception on ${thread.name}: ${throwable.message}")
+        throwable.printStackTrace(System.err)
+    }
+
+    println("[DEBUG] main() 启动")
     val viewModel = createMainViewModel() as MainViewModelImpl
+    println("[DEBUG] viewModel 创建完成")
     val settings = viewModel.settings.value
 
     var isWindowVisible by mutableStateOf(!settings.minimizeOnStartup)

@@ -108,6 +108,7 @@ class MainViewModelImpl : MainViewModel {
     override fun performExit() {
         systemMonitor.stop()
         bleManager.disconnect()
+        bleManager.stopBleService()
         scope.cancel()
     }
 
