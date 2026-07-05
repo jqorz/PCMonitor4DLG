@@ -21,8 +21,15 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.jqorz.pcmonitor4dlg"
+            packageName = "PCMonitor"
             packageVersion = "1.0.0"
+
+            windows {
+                iconFile.set(project.file("src/main/resources/icon.ico"))
+                menu = true
+                shortcut = true
+                dirChooser = true
+            }
         }
     }
 }
