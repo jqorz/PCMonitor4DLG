@@ -75,6 +75,7 @@ fun App(
                             viewModel.setShowDevicePicker(true)
                         }
                     },
+                    onDisconnect = { viewModel.disconnectDevice() },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }

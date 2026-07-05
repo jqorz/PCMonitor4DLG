@@ -26,7 +26,6 @@ interface MainViewModel {
     fun stopScan()
     fun connectDevice(device: BleDeviceInfo)
     fun disconnectDevice()
-    fun syncTime()
     fun clearBleLog()
 
     fun updateAutoStart(enabled: Boolean)

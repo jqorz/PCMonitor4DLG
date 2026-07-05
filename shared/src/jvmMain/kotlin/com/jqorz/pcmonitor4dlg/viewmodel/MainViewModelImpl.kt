@@ -64,10 +64,6 @@ class MainViewModelImpl : MainViewModel {
         bleManager.disconnect()
     }
 
-    override fun syncTime() {
-        bleManager.syncTime(scope)
-    }
-
     override fun clearBleLog() {
         bleManager.clearLog()
     }
