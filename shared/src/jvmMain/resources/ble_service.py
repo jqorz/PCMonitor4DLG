@@ -48,6 +48,7 @@ def on_disconnect(ble_client):
     global connected_address
     addr = connected_address or "unknown"
     log(f"DISCONNECT_CB: device={addr} client_is_connected={ble_client.is_connected if ble_client else 'N/A'}")
+    print(f"[BLE_EVENT] disconnected {addr}", file=sys.stderr, flush=True)
 
 
 def _run_loop(loop):

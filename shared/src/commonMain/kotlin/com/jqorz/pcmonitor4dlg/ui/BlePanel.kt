@@ -72,7 +72,7 @@ fun BlePanel(
                 }
                 BleConnectionState.SERVICE_READY -> {
                     Text(
-                        text = "📡 $deviceName [已连接]",
+                        text = "$deviceName [已连接]",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
