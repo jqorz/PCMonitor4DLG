@@ -29,6 +29,16 @@
 - 连接失败时每隔 30 秒自动重试，直到连接成功
 - 关闭该开关后立即停止自动重连
 
+### OTA固件升级
+
+设备连接后，蓝牙状态栏出现"升级"按钮，点击可对设备做无线固件升级：
+
+- 选择固件工程（`TFTMonitor`）编译后自动拷贝到桌面的 `tft_monitor_ota_<日期>_v<N>.bin`
+- 选中即校验（文件大小 + 版本魔数），显示固件版本
+- 逐包有响应传输（0xA0 起始 / 0xA2+0xA3 分页 / 0xA4 结束），弹窗显示进度
+- 完成后设备自行重启（连接断开属正常），重新连接即运行新版本
+- 传输期间暂停性能数据同步，设备屏幕冻结属正常；中途失败自动断开恢复设备状态，可重试
+
 ### 系统托盘
 
 - 最小化后应用在系统托盘运行，不占用任务栏
@@ -46,16 +56,11 @@
 ## 环境要求
 
 - Windows 10/11
-- Python 3.x（需安装 `bleak` 库，用于 BLE 通信）
 - 蓝牙适配器（支持 BLE 4.0+）
 
+> BLE 服务以 PyInstaller 打包的 `ble_service.exe` 随应用分发，目标机器**无需安装 Python 和 bleak**。Python 仅在开发时需要（见下文"BLE 服务子进程"）。
+
 ## 安装与运行
-
-### 安装 Python 依赖
-
-```bash
-pip install bleak
-```
 
 ### 运行应用
 
@@ -69,6 +74,21 @@ pip install bleak
 ./gradlew :desktopApp:packageDistribution
 ```
 
+## BLE 服务子进程
+
+BLE 通信由 `shared/src/jvmMain/resources/ble_service.py`（基于 `bleak` 库）以子进程方式提供，与主程序通过 stdin/stdout JSON 行协议交互。启动优先级：
+
+1. **打包模式**：优先使用资源中的 `ble_service.exe`（PyInstaller 单文件产物，自带 Python 运行时和 bleak）
+2. **开发回退**：exe 不存在或启动失败时，回退用系统 `python` 运行 `ble_service.py`（此时需要 `pip install bleak`）
+
+修改 `ble_service.py` 后需重新生成 exe：
+
+```bash
+tools\build_ble_exe.cmd
+```
+
+> 注意：PyInstaller 单文件 exe 每次启动时会自解压到临时目录，个别杀毒软件可能误报；如遇此问题可改用 `--onedir` 或对 exe 签名。
+
 ## 项目结构
 
 ```
@@ -77,13 +97,14 @@ pip install bleak
 ├── shared/              # 共享代码
 │   ├── src/commonMain/  # 跨平台代码（UI、ViewModel 接口、数据模型）
 │   └── src/jvmMain/     # JVM 平台实现（BLE 管理、系统监控、设置存储）
-└── resources/           # 资源文件（图标、ble_service.py）
+│       └── resources/   # ble_service.py、ble_service.exe（BLE 服务子进程）
+└── tools/               # 构建辅助脚本（build_ble_exe.cmd）
 ```
 
 ## 技术栈
 
 - Kotlin Multiplatform + Compose Multiplatform (Desktop JVM)
-- BLE 通信：Python `bleak` 库（通过子进程调用）
+- BLE 通信：Python `bleak` 库（PyInstaller 打包为 exe 后通过子进程调用）
 - 系统监控：JNA / OSHI
 - 设置持久化：`java.util.prefs.Preferences`
 - 开机自启：Windows 注册表写入

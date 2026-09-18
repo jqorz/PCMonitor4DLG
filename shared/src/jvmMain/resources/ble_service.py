@@ -131,9 +131,14 @@ async def cmd_connect(params):
         log("CONNECT: discovering services...")
         t1 = time.time()
         try:
-            services = await client.get_services()
+            # bleak 3.x 移除了 get_services()（服务发现并入 connect()，直接读 client.services），
+            # 老版本仍需显式调用；按有无该方法分支，兼容新旧 bleak
+            if hasattr(client, "get_services"):
+                services = await client.get_services()
+            else:
+                services = client.services
             elapsed = time.time() - t1
-            log(f"CONNECT: get_services() OK in {elapsed:.2f}s")
+            log(f"CONNECT: services ready in {elapsed:.2f}s")
         except Exception as e:
             elapsed = time.time() - t1
             log(f"CONNECT: get_services() FAILED after {elapsed:.2f}s: {type(e).__name__}: {e}")

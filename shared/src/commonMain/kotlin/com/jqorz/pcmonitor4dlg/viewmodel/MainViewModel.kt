@@ -20,6 +20,10 @@ interface MainViewModel {
     val showSettingsDialog: StateFlow<Boolean>
     val showDevicePicker: StateFlow<Boolean>
     val showExitDialog: StateFlow<Boolean>
+    val showOtaDialog: StateFlow<Boolean>
+
+    // OTA firmware upgrade
+    val otaInfo: StateFlow<OtaInfo>
 
     // Actions
     fun startScan()
@@ -35,6 +39,10 @@ interface MainViewModel {
     fun setShowSettingsDialog(show: Boolean)
     fun setShowDevicePicker(show: Boolean)
     fun setShowExitDialog(show: Boolean)
+    fun setShowOtaDialog(show: Boolean)
+
+    fun selectOtaFile()
+    fun startOtaUpgrade()
 
     fun handleExitRequest()
     fun performExit()

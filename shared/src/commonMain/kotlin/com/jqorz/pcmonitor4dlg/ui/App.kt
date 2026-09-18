@@ -28,6 +28,8 @@ fun App(
     val showSettingsDialog by viewModel.showSettingsDialog.collectAsState()
     val showDevicePicker by viewModel.showDevicePicker.collectAsState()
     val showExitDialog by viewModel.showExitDialog.collectAsState()
+    val showOtaDialog by viewModel.showOtaDialog.collectAsState()
+    val otaInfo by viewModel.otaInfo.collectAsState()
 
     var filterDlg by remember { mutableStateOf(true) }
     val isScanning = connectionState == BleConnectionState.SCANNING
@@ -76,6 +78,11 @@ fun App(
                         }
                     },
                     onDisconnect = { viewModel.disconnectDevice() },
+                    onUpgrade = {
+                        if (connectionState == BleConnectionState.SERVICE_READY) {
+                            viewModel.setShowOtaDialog(true)
+                        }
+                    },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
@@ -103,6 +110,17 @@ fun App(
                     viewModel.setShowDevicePicker(false)
                 },
                 onDismiss = { viewModel.setShowDevicePicker(false) }
+            )
+        }
+
+        // OTA固件升级弹窗
+        if (showOtaDialog) {
+            OtaDialog(
+                otaInfo = otaInfo,
+                connectionState = connectionState,
+                onSelectFile = { viewModel.selectOtaFile() },
+                onStart = { viewModel.startOtaUpgrade() },
+                onDismiss = { viewModel.setShowOtaDialog(false) }
             )
         }
 

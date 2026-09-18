@@ -35,6 +35,12 @@ class MainViewModelImpl : MainViewModel {
     private val _showExitDialog = MutableStateFlow(false)
     override val showExitDialog: StateFlow<Boolean> = _showExitDialog.asStateFlow()
 
+    private val _showOtaDialog = MutableStateFlow(false)
+    override val showOtaDialog: StateFlow<Boolean> = _showOtaDialog.asStateFlow()
+
+    private val _otaInfo = MutableStateFlow(OtaInfo())
+    override val otaInfo: StateFlow<OtaInfo> = _otaInfo.asStateFlow()
+
     private var autoConnectJob: Job? = null
     private var pendingConnectAddress: String? = null
 
@@ -74,7 +80,9 @@ class MainViewModelImpl : MainViewModel {
 
         autoConnectJob = scope.launch {
             while (isActive && settings.value.autoConnectLastDevice) {
-                if (bleManager.connectionState.value == BleConnectionState.DISCONNECTED) {
+                if (bleManager.connectionState.value == BleConnectionState.DISCONNECTED &&
+                    !bleManager.isOtaActive // OTA期间设备会主动断开重启，不要抢着重连
+                ) {
                     pendingConnectAddress = lastAddr
                     bleManager.connectByAddress(scope, lastAddr)
                 }
@@ -151,6 +159,64 @@ class MainViewModelImpl : MainViewModel {
 
     override fun setShowExitDialog(show: Boolean) {
         _showExitDialog.value = show
+    }
+
+    override fun setShowOtaDialog(show: Boolean) {
+        _showOtaDialog.value = show
+    }
+
+    /** 弹出系统文件选择框（默认桌面目录），选中后立即校验固件有效性 */
+    override fun selectOtaFile() {
+        val dialog = java.awt.FileDialog(null as java.awt.Frame?, "选择固件文件", java.awt.FileDialog.LOAD)
+        dialog.file = "*.bin"
+        // 默认目录：桌面（打包脚本会把 tft_monitor_ota_*.bin 拷到桌面）
+        val desktop = sequenceOf(
+            java.io.File(System.getProperty("user.home"), "Desktop"),
+            java.io.File("D:\\桌面")
+        ).firstOrNull { it.isDirectory }
+        if (desktop != null) dialog.directory = desktop.absolutePath
+        dialog.isVisible = true
+        val fileName = dialog.file ?: return
+        val filePath = java.io.File(dialog.directory, fileName).absolutePath
+
+        scope.launch(Dispatchers.IO) {
+            _otaInfo.value = OtaInfo(fileName = fileName, filePath = filePath)
+            try {
+                val version = bleManager.validateFirmware(filePath)
+                val size = java.io.File(filePath).length().toInt()
+                _otaInfo.value = OtaInfo(
+                    fileName = fileName, filePath = filePath,
+                    fileSize = size, fileVersion = version
+                )
+            } catch (e: Exception) {
+                _otaInfo.value = OtaInfo(
+                    fileName = fileName, filePath = filePath,
+                    fileError = e.message ?: "文件读取失败"
+                )
+            }
+        }
+    }
+
+    /** 开始OTA升级：结果经 [OtaInfo.running]/[OtaInfo.progress]/[OtaInfo.resultMessage] 推送到UI */
+    override fun startOtaUpgrade() {
+        val info = _otaInfo.value
+        if (!info.fileValid || info.running) return
+        if (bleManager.connectionState.value != BleConnectionState.SERVICE_READY) {
+            _otaInfo.value = info.copy(resultMessage = "设备未连接，无法升级", success = false)
+            return
+        }
+        _otaInfo.value = info.copy(running = true, progress = 0, resultMessage = "", success = false)
+        bleManager.startOta(scope, info.filePath,
+            onProgress = { progress ->
+                _otaInfo.value = _otaInfo.value.copy(progress = progress)
+            },
+            onFinished = { success, message ->
+                _otaInfo.value = _otaInfo.value.copy(
+                    running = false, progress = if (success) 100 else _otaInfo.value.progress,
+                    resultMessage = message, success = success
+                )
+            }
+        )
     }
 
     override fun handleExitRequest() {

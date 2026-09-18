@@ -21,6 +21,7 @@ fun BlePanel(
     deviceName: String,
     onClick: () -> Unit,
     onDisconnect: () -> Unit = {},
+    onUpgrade: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -77,6 +78,9 @@ fun BlePanel(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    TextButton(onClick = onUpgrade) {
+                        Text("升级")
+                    }
                     TextButton(onClick = onDisconnect) {
                         Text("断开", color = MaterialTheme.colorScheme.error)
                     }
