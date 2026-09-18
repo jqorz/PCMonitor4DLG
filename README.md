@@ -83,11 +83,7 @@ BLE 通信由 `shared/src/jvmMain/resources/ble_service.py`（基于 `bleak` 库
 1. **打包模式**：优先使用资源中的 `ble_service.exe`（PyInstaller 单文件产物，自带 Python 运行时和 bleak）
 2. **开发回退**：exe 不存在或启动失败时，回退用系统 `python` 运行 `ble_service.py`（此时需要 `pip install bleak`）
 
-修改 `ble_service.py` 后需重新生成 exe：
-
-```bash
-tools\build_ble_exe.cmd
-```
+`ble_service.exe` 是 9MB 二进制产物，**不入 git**：构建/打包时由 gradle 自动调用 `tools\build_ble_exe.cmd`（PyInstaller）生成到 `shared/build/generated/ble-exe/` 并挂入打包资源。修改 `ble_service.py` 后直接重新构建即可，gradle 检测到 py 变化会自动重新生成 exe；也可手动执行 `tools\build_ble_exe.cmd`（需已安装 Python + pyinstaller）。
 
 > 注意：PyInstaller 单文件 exe 每次启动时会自解压到临时目录，个别杀毒软件可能误报；如遇此问题可改用 `--onedir` 或对 exe 签名。
 
@@ -99,7 +95,7 @@ tools\build_ble_exe.cmd
 ├── shared/              # 共享代码
 │   ├── src/commonMain/  # 跨平台代码（UI、ViewModel 接口、数据模型）
 │   └── src/jvmMain/     # JVM 平台实现（BLE 管理、系统监控、设置存储）
-│       └── resources/   # ble_service.py、ble_service.exe（BLE 服务子进程）
+│       └── resources/   # ble_service.py（BLE 服务子进程；exe 构建时自动生成，不入git）
 └── tools/               # 构建辅助脚本（build_ble_exe.cmd）
 ```
 

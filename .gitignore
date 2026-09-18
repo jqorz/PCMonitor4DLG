@@ -18,3 +18,6 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 /desktopApp/bin
+
+# BLE子进程exe由打包时自动生成（tools/build_ble_exe.cmd），不入库
+shared/src/jvmMain/resources/ble_service.exe

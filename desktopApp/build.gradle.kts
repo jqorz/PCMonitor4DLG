@@ -36,3 +36,19 @@ compose.desktop {
         }
     }
 }
+
+// 打包完成后自动拷贝MSI产物到桌面（桌面被重定向到 D:\桌面，与固件flashtool/OTA选文件的解析逻辑一致）
+val desktopDir = sequenceOf(
+    File(System.getProperty("user.home"), "Desktop"),
+    File("D:\\桌面")
+).firstOrNull { it.isDirectory } ?: File("D:\\桌面")
+
+val copyPackageToDesktop by tasks.registering(Copy::class) {
+    from(layout.buildDirectory.dir("compose/binaries/main/msi"))
+    include("*.msi")
+    into(desktopDir)
+}
+
+tasks.matching { it.name == "packageMsi" }.configureEach {
+    finalizedBy(copyPackageToDesktop)
+}
