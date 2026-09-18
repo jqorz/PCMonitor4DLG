@@ -61,6 +61,9 @@ class BleManager {
     // 复用的写缓冲区，避免每秒分配 ByteArray
     private val writeBuffer = ByteArray(12)
 
+    // 主题命令缓冲区（0xB1，与数据同步的writeBuffer分开，避免并发写交错）
+    private val themeBuffer = ByteArray(12)
+
     private var scanJob: Job? = null
     private var syncJob: Job? = null
 
@@ -242,6 +245,9 @@ class BleManager {
         }
     }
 
+    // 命令-响应对必须原子：数据同步(1/s)、主题同步等调用方可能并发，
+    // 不加锁会导致两个协程交叉读走对方的响应
+    @Synchronized
     private fun sendCommand(json: String): String? {
         if (!sendLine(json)) return null
         return readResponse()
@@ -468,6 +474,22 @@ class BleManager {
         if (handle == 0) return
         val dataB64 = BASE64_ENCODER.encodeToString(data)
         sendCommand("""{"cmd":"write","handle":$handle,"data":"$dataB64"}""")
+    }
+
+    // ---- Device theme ----
+
+    /**
+     * 下发设备主题命令 (0xB1)。
+     *
+     * 设备端全屏重绘约1-2秒，期间链路由BLE中断维持，本次写的ACK由协议栈先行返回。
+     * 未连接/句柄无效时静默跳过（设置已持久化，连接时会再同步一次）。
+     */
+    fun sendTheme(dark: Boolean) {
+        if (ctrlPointAttrHandle == 0) return
+        if (_connectionState.value != BleConnectionState.SERVICE_READY) return
+        themeBuffer[0] = 0xB1.toByte()
+        themeBuffer[1] = if (dark) 1 else 0
+        writeCharacteristic(ctrlPointAttrHandle, themeBuffer)
     }
 
     // ---- OTA firmware upgrade ----

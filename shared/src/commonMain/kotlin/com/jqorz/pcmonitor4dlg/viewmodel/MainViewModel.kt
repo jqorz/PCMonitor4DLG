@@ -36,6 +36,7 @@ interface MainViewModel {
 
     fun updateAutoStart(enabled: Boolean)
     fun updateAutoConnectLastDevice(enabled: Boolean)
+    fun updateDeviceTheme(dark: Boolean)
     fun updateExitAction(action: ExitAction)
 
     fun setShowSettingsDialog(show: Boolean)

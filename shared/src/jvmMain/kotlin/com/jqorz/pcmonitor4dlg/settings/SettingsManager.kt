@@ -14,6 +14,7 @@ class SettingsManager {
         private const val KEY_LAST_DEVICE_ADDRESS = "last_device_address"
         private const val KEY_LAST_DEVICE_VERSION = "last_device_version"
         private const val KEY_EXIT_ACTION = "exit_action"
+        private const val KEY_DEVICE_THEME_DARK = "device_theme_dark"
         private const val REG_RUN_PATH = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
         private const val APP_NAME = "PCMonitor4DLG"
     }
@@ -27,6 +28,7 @@ class SettingsManager {
         return AppSettings(
             autoStartOnBoot = prefs.getBoolean(KEY_AUTO_START, false),
             autoConnectLastDevice = prefs.getBoolean(KEY_AUTO_CONNECT_LAST_DEVICE, false),
+            deviceThemeDark = prefs.getBoolean(KEY_DEVICE_THEME_DARK, true),
             exitAction = ExitAction.entries[prefs.getInt(KEY_EXIT_ACTION, ExitAction.ASK.ordinal)]
         )
     }
@@ -56,6 +58,12 @@ class SettingsManager {
 
     fun saveLastDeviceVersion(version: Int) {
         prefs.putInt(KEY_LAST_DEVICE_VERSION, version)
+    }
+
+    /** 设备主题：true=深色(黑底白字) false=浅色(白底黑字)，连接时同步给设备(0xB1) */
+    fun updateDeviceTheme(dark: Boolean) {
+        prefs.putBoolean(KEY_DEVICE_THEME_DARK, dark)
+        _settings.value = _settings.value.copy(deviceThemeDark = dark)
     }
 
     fun updateExitAction(action: ExitAction) {

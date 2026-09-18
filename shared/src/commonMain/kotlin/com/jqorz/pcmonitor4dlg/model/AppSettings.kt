@@ -7,5 +7,6 @@ enum class ExitAction {
 data class AppSettings(
     val autoStartOnBoot: Boolean = false,
     val autoConnectLastDevice: Boolean = false,
+    val deviceThemeDark: Boolean = true,
     val exitAction: ExitAction = ExitAction.ASK
 )

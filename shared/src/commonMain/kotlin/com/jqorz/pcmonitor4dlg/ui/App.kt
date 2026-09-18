@@ -1,5 +1,10 @@
 package com.jqorz.pcmonitor4dlg.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -34,6 +39,8 @@ fun App(
     val showBluetoothOffDialog by viewModel.showBluetoothOffDialog.collectAsState()
 
     var filterDlg by remember { mutableStateOf(true) }
+    // 设备设置抽屉展开状态（纯UI状态；断开连接时由可见条件自动收起）
+    var showDeviceSettings by remember { mutableStateOf(false) }
     val isScanning = connectionState == BleConnectionState.SCANNING
 
     MaterialTheme {
@@ -86,8 +93,22 @@ fun App(
                             viewModel.setShowOtaDialog(true)
                         }
                     },
+                    onDeviceSettings = { showDeviceSettings = !showDeviceSettings },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
+
+                // 设备设置抽屉：仅连接就绪时可展开，断开自动收起
+                AnimatedVisibility(
+                    visible = showDeviceSettings && connectionState == BleConnectionState.SERVICE_READY,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    DeviceSettingsPanel(
+                        themeDark = settings.deviceThemeDark,
+                        onThemeChanged = { viewModel.updateDeviceTheme(it) },
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                    )
+                }
             }
         }
 
@@ -95,7 +116,7 @@ fun App(
         if (showDevicePicker) {
             // 在 UI 层根据勾选框过滤设备，切换即时生效
             val filteredDevices = if (filterDlg) {
-                scannedDevices.filter { it.name.startsWith("DLG-PC", ignoreCase = true) }
+                scannedDevices.filter { it.name.contains("PCM", ignoreCase = true) }
             } else {
                 scannedDevices
             }

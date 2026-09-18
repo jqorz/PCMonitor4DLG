@@ -48,7 +48,7 @@ fun DevicePickerDialog(
                         onCheckedChange = onFilterChanged
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("只显示 DLG-PC 开头的设备", style = MaterialTheme.typography.bodyMedium)
+                    Text("只显示 PCM 设备", style = MaterialTheme.typography.bodyMedium)
                 }
 
                 HorizontalDivider()

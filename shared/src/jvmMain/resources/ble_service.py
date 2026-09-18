@@ -86,18 +86,24 @@ async def cmd_scan(params):
     found = {}  # address -> 设备条目，detection_callback 持续补充/修正
 
     def on_detection(d, ad):
-        name = d.name or ad.local_name or ""
         addr = d.address or ""
         if not addr:
             return
+        prev = found.get(addr) or {}
+        # 字段级合并：广播/扫描响应是两类事件，各自可能只带部分AD。
+        # 设备对主动扫描会回空的SCAN_RSP——那种事件没有厂商数据但bleak会补缓存名，
+        # 若整条覆盖会把已解析的版本号抹掉（表现为版本号时有时无），缺省字段沿用上次值
+        name = d.name or ad.local_name or prev.get("name") or ""
         entry = {"name": name, "address": addr}
+        version = prev.get("version")
         # 固件把 EPD_VERSION 低16位放进 0xFF 厂商AD（未含公司ID，见固件 user_peripheral.c），
         # 空中字节为 [版本号, 0x00]，bleak 解析为 company_id=版本号 + 空数据
-        if name.upper().startswith("DLG") and len(ad.manufacturer_data) == 1:
+        if name.upper().startswith("PCM") and len(ad.manufacturer_data) == 1:
             cid, payload = next(iter(ad.manufacturer_data.items()))
             if not payload and cid > 0 and (cid >> 8) == 0:
-                entry["version"] = cid & 0xFF
-        # 同一设备后续广播可能补全名称/版本，内容变化时覆盖
+                version = cid & 0xFF
+        if version:
+            entry["version"] = version
         if found.get(addr) != entry:
             found[addr] = entry
 

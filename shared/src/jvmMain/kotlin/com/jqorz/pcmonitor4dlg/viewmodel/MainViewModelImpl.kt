@@ -57,6 +57,8 @@ class MainViewModelImpl : MainViewModel {
         scope.launch {
             bleManager.connectionState.collectLatest { state ->
                 if (state == BleConnectionState.SERVICE_READY) {
+                    // 连接建立后先把本机主题设置同步给设备（设备端持久化，保持两边一致）
+                    bleManager.sendTheme(settings.value.deviceThemeDark)
                     bleManager.startDataSync(scope) { systemMonitor.stats.value }
                 }
             }
@@ -154,6 +156,12 @@ class MainViewModelImpl : MainViewModel {
             autoConnectJob?.cancel()
             autoConnectJob = null
         }
+    }
+
+    /** 切换设备主题：保存设置，已连接时立即下发0xB1（设备重绘并持久化） */
+    override fun updateDeviceTheme(dark: Boolean) {
+        settingsManager.updateDeviceTheme(dark)
+        bleManager.sendTheme(dark)
     }
 
     override fun updateExitAction(action: ExitAction) {

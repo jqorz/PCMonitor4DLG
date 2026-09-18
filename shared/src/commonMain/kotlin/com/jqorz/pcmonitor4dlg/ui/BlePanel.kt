@@ -27,6 +27,7 @@ fun BlePanel(
     onClick: () -> Unit,
     onDisconnect: () -> Unit = {},
     onUpgrade: () -> Unit = {},
+    onDeviceSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val connected = connectionState == BleConnectionState.CONNECTED ||
@@ -125,6 +126,9 @@ fun BlePanel(
 
             // 操作按钮固定在右端
             if (connectionState == BleConnectionState.SERVICE_READY) {
+                TextButton(onClick = onDeviceSettings) {
+                    Text("设备设置")
+                }
                 TextButton(onClick = onUpgrade) {
                     Text("升级")
                 }
