@@ -23,6 +23,7 @@ fun App(
     val systemStats by viewModel.systemStats.collectAsState()
     val connectionState by viewModel.bleConnectionState.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
+    val connectedDeviceVersion by viewModel.connectedDeviceVersion.collectAsState()
     val scannedDevices by viewModel.scannedDevices.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val showSettingsDialog by viewModel.showSettingsDialog.collectAsState()
@@ -30,6 +31,7 @@ fun App(
     val showExitDialog by viewModel.showExitDialog.collectAsState()
     val showOtaDialog by viewModel.showOtaDialog.collectAsState()
     val otaInfo by viewModel.otaInfo.collectAsState()
+    val showBluetoothOffDialog by viewModel.showBluetoothOffDialog.collectAsState()
 
     var filterDlg by remember { mutableStateOf(true) }
     val isScanning = connectionState == BleConnectionState.SCANNING
@@ -72,6 +74,7 @@ fun App(
                 BlePanel(
                     connectionState = connectionState,
                     deviceName = connectedDeviceName,
+                    deviceVersion = connectedDeviceVersion,
                     onClick = {
                         if (connectionState == BleConnectionState.DISCONNECTED) {
                             viewModel.setShowDevicePicker(true)
@@ -131,6 +134,20 @@ fun App(
                 onAutoStartChanged = { viewModel.updateAutoStart(it) },
                 onAutoConnectLastDeviceChanged = { viewModel.updateAutoConnectLastDevice(it) },
                 onDismiss = { viewModel.setShowSettingsDialog(false) }
+            )
+        }
+
+        // 蓝牙未开启提示弹窗
+        if (showBluetoothOffDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.setShowBluetoothOffDialog(false) },
+                title = { Text("蓝牙未开启", fontWeight = FontWeight.Bold) },
+                text = { Text("请先打开电脑的蓝牙开关，开启后再选择设备。") },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.setShowBluetoothOffDialog(false) }) {
+                        Text("确定")
+                    }
+                }
             )
         }
 

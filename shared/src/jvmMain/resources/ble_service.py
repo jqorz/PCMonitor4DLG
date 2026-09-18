@@ -79,13 +79,23 @@ def run_async(coro):
 async def cmd_scan(params):
     timeout = params.get("timeout", 10)
     log(f"scan: timeout={timeout}")
-    devices = await BleakScanner.discover(timeout=timeout)
+    # bleak 3.x: return_adv=True 返回 {address: (BLEDevice, AdvertisementData)}，
+    # 广播数据用于解析固件广播的版本号
+    devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
     result = []
-    for d in devices:
-        name = d.name if d.name else ""
+    for d, ad in devices.values():
+        name = d.name or ad.local_name or ""
         addr = d.address if d.address else ""
-        if addr:
-            result.append({"name": name, "address": addr})
+        if not addr:
+            continue
+        entry = {"name": name, "address": addr}
+        # 固件把 EPD_VERSION 低16位放进 0xFF 厂商AD（未含公司ID，见固件 user_peripheral.c），
+        # 空中字节为 [版本号, 0x00]，bleak 解析为 company_id=版本号 + 空数据
+        if name.upper().startswith("DLG") and len(ad.manufacturer_data) == 1:
+            cid, payload = next(iter(ad.manufacturer_data.items()))
+            if not payload and cid > 0 and (cid >> 8) == 0:
+                entry["version"] = cid & 0xFF
+        result.append(entry)
     log(f"scan: found {len(result)} devices")
     respond({"ok": True, "devices": result})
 

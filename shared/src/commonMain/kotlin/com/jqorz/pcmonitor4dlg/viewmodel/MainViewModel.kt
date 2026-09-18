@@ -10,6 +10,7 @@ interface MainViewModel {
     // BLE
     val bleConnectionState: StateFlow<BleConnectionState>
     val connectedDeviceName: StateFlow<String>
+    val connectedDeviceVersion: StateFlow<Int>
     val scannedDevices: StateFlow<List<BleDeviceInfo>>
     val bleLogs: StateFlow<List<String>>
 
@@ -21,6 +22,7 @@ interface MainViewModel {
     val showDevicePicker: StateFlow<Boolean>
     val showExitDialog: StateFlow<Boolean>
     val showOtaDialog: StateFlow<Boolean>
+    val showBluetoothOffDialog: StateFlow<Boolean>
 
     // OTA firmware upgrade
     val otaInfo: StateFlow<OtaInfo>
@@ -40,6 +42,7 @@ interface MainViewModel {
     fun setShowDevicePicker(show: Boolean)
     fun setShowExitDialog(show: Boolean)
     fun setShowOtaDialog(show: Boolean)
+    fun setShowBluetoothOffDialog(show: Boolean)
 
     fun selectOtaFile()
     fun startOtaUpgrade()

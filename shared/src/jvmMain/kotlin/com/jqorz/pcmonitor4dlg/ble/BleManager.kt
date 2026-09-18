@@ -31,7 +31,7 @@ class BleManager {
         // 预编译 Regex，避免每次调用重新编译
         private val REGEX_JSON_STRING = Regex(""""(\w+)"\s*:\s*"([^"]*)"""")
         private val REGEX_JSON_BOOL = Regex(""""(\w+)"\s*:\s*(true|false)""")
-        private val REGEX_DEVICE_ITEM = Regex("""\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*"address"\s*:\s*"([^"]*)"[^{}]*\}""")
+        private val REGEX_DEVICE_ITEM = Regex("""\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*"address"\s*:\s*"([^"]*)"(?:[^{}]*"version"\s*:\s*(\d+))?[^{}]*\}""")
         private val REGEX_CHARS_SECTION = Regex(""""chars"\s*:\s*\{([^}]*)\}""")
         private val REGEX_CHARS_ENTRY = Regex(""""([^"]+)"\s*:\s*(\d+)""")
 
@@ -47,6 +47,10 @@ class BleManager {
 
     private val _connectedDeviceName = MutableStateFlow("")
     val connectedDeviceName: StateFlow<String> = _connectedDeviceName.asStateFlow()
+
+    /** 已连接设备的固件版本号（来自扫描广播或持久化记录），0 表示未知 */
+    private val _connectedDeviceVersion = MutableStateFlow(0)
+    val connectedDeviceVersion: StateFlow<Int> = _connectedDeviceVersion.asStateFlow()
 
     private val _scannedDevices = MutableStateFlow<List<BleDeviceInfo>>(emptyList())
     val scannedDevices: StateFlow<List<BleDeviceInfo>> = _scannedDevices.asStateFlow()
@@ -95,7 +99,9 @@ class BleManager {
             val name = m.groupValues[1]
             val address = m.groupValues[2]
             if (address.isNotEmpty()) {
-                devices.add(BleDeviceInfo(name, address))
+                // 固件在广播的厂商AD里带了版本号（0 表示未携带）
+                val version = m.groupValues[3].toIntOrNull() ?: 0
+                devices.add(BleDeviceInfo(name, address, version))
             }
         }
         return devices
@@ -172,6 +178,7 @@ class BleManager {
                             ctrlPointAttrHandle = 0
                             _connectionState.value = BleConnectionState.DISCONNECTED
                             _connectedDeviceName.value = ""
+                            _connectedDeviceVersion.value = 0
                         } else {
                             System.err.println("[ble] $line")
                         }
@@ -279,6 +286,7 @@ class BleManager {
         disconnect()
         _connectionState.value = BleConnectionState.CONNECTING
         _connectedDeviceName.value = device.name
+        _connectedDeviceVersion.value = device.version
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -319,12 +327,13 @@ class BleManager {
 
     /**
      * 通过 MAC 地址直接连接设备，用于自动重连场景。
-     * 连接成功后设备名称会从响应中获取。
+     * 连接成功后设备名称会从响应中获取；[version] 为持久化的固件版本号，0 表示未知。
      */
-    fun connectByAddress(scope: CoroutineScope, address: String) {
+    fun connectByAddress(scope: CoroutineScope, address: String, version: Int = 0) {
         disconnect()
         _connectionState.value = BleConnectionState.CONNECTING
         _connectedDeviceName.value = address
+        _connectedDeviceVersion.value = version
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -527,6 +536,7 @@ class BleManager {
                 writeOtaPacket(handle, buf)
 
                 addLog("OTA done: v$firmVer transferred")
+                _connectedDeviceVersion.value = firmVer // 设备即将重启，界面先更新为新版本
                 onProgress(100)
                 onFinished(true, "升级完成 v$firmVer：设备已重启（连接断开属正常），请重新连接")
             } catch (e: Exception) {
@@ -593,6 +603,7 @@ class BleManager {
         ctrlPointAttrHandle = 0
         _connectionState.value = BleConnectionState.DISCONNECTED
         _connectedDeviceName.value = ""
+        _connectedDeviceVersion.value = 0
     }
 
     // ---- Logging ----

@@ -12,6 +12,7 @@ class SettingsManager {
         private const val KEY_AUTO_START = "auto_start_on_boot"
         private const val KEY_AUTO_CONNECT_LAST_DEVICE = "auto_connect_last_device"
         private const val KEY_LAST_DEVICE_ADDRESS = "last_device_address"
+        private const val KEY_LAST_DEVICE_VERSION = "last_device_version"
         private const val KEY_EXIT_ACTION = "exit_action"
         private const val REG_RUN_PATH = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
         private const val APP_NAME = "PCMonitor4DLG"
@@ -48,6 +49,13 @@ class SettingsManager {
 
     fun saveLastDeviceAddress(address: String) {
         prefs.put(KEY_LAST_DEVICE_ADDRESS, address)
+    }
+
+    /** 上次成功连接设备的固件版本号（与地址配对保存），0 表示未知 */
+    fun getLastDeviceVersion(): Int = prefs.getInt(KEY_LAST_DEVICE_VERSION, 0)
+
+    fun saveLastDeviceVersion(version: Int) {
+        prefs.putInt(KEY_LAST_DEVICE_VERSION, version)
     }
 
     fun updateExitAction(action: ExitAction) {

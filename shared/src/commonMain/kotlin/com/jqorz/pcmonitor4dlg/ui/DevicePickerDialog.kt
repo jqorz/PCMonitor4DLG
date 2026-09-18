@@ -128,7 +128,11 @@ private fun DeviceItem(
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = device.address,
+                text = if (device.version > 0) {
+                    "${device.address}  ·  固件 v${device.version}"
+                } else {
+                    device.address
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

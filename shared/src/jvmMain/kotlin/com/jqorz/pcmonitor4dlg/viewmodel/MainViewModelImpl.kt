@@ -1,6 +1,7 @@
 package com.jqorz.pcmonitor4dlg.viewmodel
 
 import com.jqorz.pcmonitor4dlg.ble.BleManager
+import com.jqorz.pcmonitor4dlg.ble.BluetoothRadio
 import com.jqorz.pcmonitor4dlg.model.*
 import com.jqorz.pcmonitor4dlg.monitor.SystemMonitor
 import com.jqorz.pcmonitor4dlg.settings.SettingsManager
@@ -21,6 +22,7 @@ class MainViewModelImpl : MainViewModel {
 
     override val bleConnectionState: StateFlow<BleConnectionState> = bleManager.connectionState
     override val connectedDeviceName: StateFlow<String> = bleManager.connectedDeviceName
+    override val connectedDeviceVersion: StateFlow<Int> = bleManager.connectedDeviceVersion
     override val scannedDevices: StateFlow<List<BleDeviceInfo>> = bleManager.scannedDevices
     override val bleLogs: StateFlow<List<String>> = bleManager.logs
 
@@ -38,11 +40,15 @@ class MainViewModelImpl : MainViewModel {
     private val _showOtaDialog = MutableStateFlow(false)
     override val showOtaDialog: StateFlow<Boolean> = _showOtaDialog.asStateFlow()
 
+    private val _showBluetoothOffDialog = MutableStateFlow(false)
+    override val showBluetoothOffDialog: StateFlow<Boolean> = _showBluetoothOffDialog.asStateFlow()
+
     private val _otaInfo = MutableStateFlow(OtaInfo())
     override val otaInfo: StateFlow<OtaInfo> = _otaInfo.asStateFlow()
 
     private var autoConnectJob: Job? = null
     private var pendingConnectAddress: String? = null
+    private var pendingConnectVersion: Int? = null
 
     init {
         systemMonitor.start(scope)
@@ -56,14 +62,17 @@ class MainViewModelImpl : MainViewModel {
             }
         }
 
-        // Save last device address on successful connection
+        // Save last device address/version on successful connection
         scope.launch {
             bleManager.connectionState.collectLatest { state ->
                 if (state == BleConnectionState.SERVICE_READY) {
                     val addr = pendingConnectAddress
+                    val ver = pendingConnectVersion
                     if (addr != null) {
                         settingsManager.saveLastDeviceAddress(addr)
+                        if (ver != null && ver > 0) settingsManager.saveLastDeviceVersion(ver)
                         pendingConnectAddress = null
+                        pendingConnectVersion = null
                     }
                 }
             }
@@ -84,7 +93,8 @@ class MainViewModelImpl : MainViewModel {
                     !bleManager.isOtaActive // OTA期间设备会主动断开重启，不要抢着重连
                 ) {
                     pendingConnectAddress = lastAddr
-                    bleManager.connectByAddress(scope, lastAddr)
+                    // 版本号每次从设置读取，OTA 升级成功后无需重启应用即可显示新版本
+                    bleManager.connectByAddress(scope, lastAddr, settingsManager.getLastDeviceVersion())
                 }
                 // 等待连接结果或30秒后重试
                 val startTime = System.currentTimeMillis()
@@ -120,6 +130,7 @@ class MainViewModelImpl : MainViewModel {
 
     override fun connectDevice(device: BleDeviceInfo) {
         pendingConnectAddress = device.address
+        pendingConnectVersion = device.version.takeIf { it > 0 }
         bleManager.connect(scope, device)
     }
 
@@ -154,6 +165,11 @@ class MainViewModelImpl : MainViewModel {
     }
 
     override fun setShowDevicePicker(show: Boolean) {
+        // 门禁：打开设备选择器前先检查蓝牙开关，未开启则直接提示，不再继续
+        if (show && !BluetoothRadio.isBluetoothEnabled()) {
+            _showBluetoothOffDialog.value = true
+            return
+        }
         _showDevicePicker.value = show
     }
 
@@ -163,6 +179,10 @@ class MainViewModelImpl : MainViewModel {
 
     override fun setShowOtaDialog(show: Boolean) {
         _showOtaDialog.value = show
+    }
+
+    override fun setShowBluetoothOffDialog(show: Boolean) {
+        _showBluetoothOffDialog.value = show
     }
 
     /** 弹出系统文件选择框（默认桌面目录），选中后立即校验固件有效性 */
@@ -211,6 +231,10 @@ class MainViewModelImpl : MainViewModel {
                 _otaInfo.value = _otaInfo.value.copy(progress = progress)
             },
             onFinished = { success, message ->
+                if (success && info.fileVersion > 0) {
+                    // 设备已重启运行新固件，更新持久化版本号，自动重连后界面显示新版本
+                    settingsManager.saveLastDeviceVersion(info.fileVersion)
+                }
                 _otaInfo.value = _otaInfo.value.copy(
                     running = false, progress = if (success) 100 else _otaInfo.value.progress,
                     resultMessage = message, success = success
