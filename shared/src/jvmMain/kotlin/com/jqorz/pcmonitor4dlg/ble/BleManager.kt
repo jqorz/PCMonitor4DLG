@@ -215,6 +215,8 @@ class BleManager {
         bleReader = null
     }
 
+    // 子进程命令协议是严格串行的，写入必须互斥，防止多线程写行交错损坏
+    @Synchronized
     private fun sendLine(json: String): Boolean {
         val writer = bleWriter ?: return false
         try {
@@ -248,7 +250,7 @@ class BleManager {
     // ---- Scanning ----
 
     fun startScan(scope: CoroutineScope) {
-        stopScan()
+        stopScanAndWait() // 终止并排空上一次扫描，保证本扫描独占响应管道
         _connectionState.value = BleConnectionState.SCANNING
         _scannedDevices.value = emptyList()
 
@@ -291,11 +293,32 @@ class BleManager {
         if (_connectionState.value == BleConnectionState.SCANNING) {
             _connectionState.value = BleConnectionState.DISCONNECTED
         }
+        // 终止子进程侧扫描（无响应命令）：py收到后立刻取消扫描并发出扫描final响应，
+        // 由排空协程消费后退出，命令管道恢复干净。幂等，无扫描时是空操作
+        if (bleProcess?.isAlive == true) {
+            sendLine("""{"cmd":"stop_scan"}""")
+        }
+    }
+
+    /**
+     * 终止扫描并等待排空协程退出（它读到扫描final响应后自然结束）。
+     *
+     * 子进程的扫描响应（partial流+final）由scanJob独占消费；发起连接或新扫描前必须
+     * 等它退出，否则两个读者竞争抢行会造成命令响应错位——表面连接成功但特征句柄
+     * 解析为0，数据同步静默停止。stop_scan后py立刻结束扫描，通常<100ms返回。
+     */
+    private fun stopScanAndWait(timeoutMs: Long = 3000) {
+        val job = scanJob
+        stopScan()
+        if (job != null && job.isActive) {
+            runBlocking { withTimeoutOrNull(timeoutMs) { job.join() } }
+        }
     }
 
     // ---- Connection ----
 
     fun connect(scope: CoroutineScope, device: BleDeviceInfo) {
+        stopScanAndWait() // 排空扫描响应流，避免连接命令的响应被错位消费
         disconnect()
         _connectionState.value = BleConnectionState.CONNECTING
         _connectedDeviceName.value = device.name
@@ -331,6 +354,15 @@ class BleManager {
                     }
                 }
 
+                // 响应错位保护：连接ok却没解析到目标特征，说明响应流已错乱，
+                // 按失败处理。否则句柄为0会让数据同步静默停止（表面连接正常但设备永不刷新）
+                if (ctrlPointAttrHandle == 0 && longValueAttrHandle == 0) {
+                    addLog("connect ok but no chars found (desync?): ${resp.take(120)}")
+                    System.err.println("[ble] connect ok but no chars found: ${resp.take(200)}")
+                    _connectionState.value = BleConnectionState.DISCONNECTED
+                    return@launch
+                }
+
                 _connectionState.value = BleConnectionState.SERVICE_READY
             } catch (_: Exception) {
                 _connectionState.value = BleConnectionState.DISCONNECTED
@@ -343,6 +375,7 @@ class BleManager {
      * 连接成功后设备名称会从响应中获取；[version] 为持久化的固件版本号，0 表示未知。
      */
     fun connectByAddress(scope: CoroutineScope, address: String, version: Int = 0) {
+        stopScanAndWait() // 排空扫描响应流，避免连接命令的响应被错位消费
         disconnect()
         _connectionState.value = BleConnectionState.CONNECTING
         _connectedDeviceName.value = address
@@ -382,6 +415,14 @@ class BleManager {
                         LONG_VALUE_UUID -> longValueAttrHandle = handle
                         CTRL_POINT_UUID -> ctrlPointAttrHandle = handle
                     }
+                }
+
+                // 响应错位保护：同connect()
+                if (ctrlPointAttrHandle == 0 && longValueAttrHandle == 0) {
+                    addLog("connect ok but no chars found (desync?): ${resp.take(120)}")
+                    System.err.println("[ble] connect ok but no chars found: ${resp.take(200)}")
+                    _connectionState.value = BleConnectionState.DISCONNECTED
+                    return@launch
                 }
 
                 _connectionState.value = BleConnectionState.SERVICE_READY

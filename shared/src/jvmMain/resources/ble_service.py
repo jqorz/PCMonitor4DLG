@@ -19,6 +19,9 @@ client = None
 handle_to_uuid = {}
 connected_address = None
 
+# 当前扫描任务（stop_scan/connect 需要取消它，避免扫描阻塞命令管道）
+scan_task = None
+
 # Single persistent event loop on a background thread
 _loop = None
 _loop_thread = None
@@ -77,6 +80,7 @@ def run_async(coro):
 
 
 async def cmd_scan(params):
+    global scan_task
     timeout = params.get("timeout", 10)
     log(f"scan: timeout={timeout}")
     found = {}  # address -> 设备条目，detection_callback 持续补充/修正
@@ -99,6 +103,7 @@ async def cmd_scan(params):
 
     scanner = BleakScanner(detection_callback=on_detection)
     await scanner.start()
+    scan_task = asyncio.current_task()
     try:
         deadline = time.time() + timeout
         last_snapshot = None
@@ -109,10 +114,29 @@ async def cmd_scan(params):
             if snapshot != last_snapshot:
                 last_snapshot = snapshot
                 respond({"ok": True, "partial": True, "devices": snapshot})
+    except asyncio.CancelledError:
+        # stop_scan/连接前取消：吞掉取消信号，照常发final响应保持FIFO配对
+        log("scan: cancelled")
     finally:
+        scan_task = None
         await scanner.stop()
     log(f"scan: found {len(found)} devices")
     respond({"ok": True, "devices": list(found.values())})
+
+
+async def cancel_scan():
+    """取消进行中的扫描并等它发出final响应。扫描不在时是空操作。"""
+    t = scan_task
+    if t and not t.done():
+        t.cancel()
+        while not t.done():
+            await asyncio.sleep(0.02)
+
+
+async def cmd_stop_scan(params):
+    # 无响应命令（刻意）：Kotlin在连接前发送以终止扫描，
+    # 扫描任务的final响应由Kotlin的排空协程消费，多回一行反而会造成响应错位
+    await cancel_scan()
 
 
 async def cmd_connect(params):
@@ -120,6 +144,9 @@ async def cmd_connect(params):
     address = params["address"]
     max_retries = 3
     log(f"CONNECT >>> address={address}, max_retries={max_retries}")
+
+    # 先终止进行中的扫描（其final响应先于connect响应发出，保证FIFO按序配对）
+    await cancel_scan()
 
     if client:
         try:
@@ -285,7 +312,12 @@ def main():
 
         try:
             if cmd_name == "scan":
-                run_async(cmd_scan(cmd))
+                # 非阻塞派发：扫描期间主线程继续读命令（stop_scan/connect可即时取消扫描），
+                # partial/final响应由cmd_scan协程自己发
+                _start_loop()
+                asyncio.run_coroutine_threadsafe(cmd_scan(cmd), _loop)
+            elif cmd_name == "stop_scan":
+                run_async(cmd_stop_scan(cmd))
             elif cmd_name == "connect":
                 run_async(cmd_connect(cmd))
             elif cmd_name == "write":

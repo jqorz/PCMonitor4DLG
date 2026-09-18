@@ -95,7 +95,7 @@ fun App(
         if (showDevicePicker) {
             // 在 UI 层根据勾选框过滤设备，切换即时生效
             val filteredDevices = if (filterDlg) {
-                scannedDevices.filter { it.name.startsWith("DLG", ignoreCase = true) }
+                scannedDevices.filter { it.name.startsWith("DLG-PC", ignoreCase = true) }
             } else {
                 scannedDevices
             }
