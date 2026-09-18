@@ -215,20 +215,34 @@ class BleManager {
         bleReader = null
     }
 
-    private fun sendCommand(json: String): String? {
-        val writer = bleWriter ?: return null
-        val reader = bleReader ?: return null
-        val p = bleProcess ?: return null
-        if (!p.isAlive) return null
+    private fun sendLine(json: String): Boolean {
+        val writer = bleWriter ?: return false
         try {
             writer.write(json)
             writer.newLine()
             writer.flush()
-            return reader.readLine()
+            return true
         } catch (e: Exception) {
             addLog("sendCommand error: ${e.message}")
-            return null
+            return false
         }
+    }
+
+    private fun readResponse(): String? {
+        val reader = bleReader ?: return null
+        val p = bleProcess ?: return null
+        if (!p.isAlive) return null
+        return try {
+            reader.readLine()
+        } catch (e: Exception) {
+            addLog("readResponse error: ${e.message}")
+            null
+        }
+    }
+
+    private fun sendCommand(json: String): String? {
+        if (!sendLine(json)) return null
+        return readResponse()
     }
 
     // ---- Scanning ----
@@ -245,24 +259,23 @@ class BleManager {
                     return@launch
                 }
 
-                val startTime = System.currentTimeMillis()
-                val resp = sendCommand("""{"cmd":"scan","timeout":10}""")
-
-                val elapsed = System.currentTimeMillis() - startTime
-                if (elapsed < 2000) delay(2000 - elapsed)
-
-                if (resp == null) {
+                if (!sendLine("""{"cmd":"scan","timeout":10}""")) {
                     _connectionState.value = BleConnectionState.DISCONNECTED
                     return@launch
                 }
 
-                val ok = jsonGetBool(resp, "ok") ?: false
-                if (!ok) {
-                    _connectionState.value = BleConnectionState.DISCONNECTED
-                    return@launch
+                // 边扫描边接收：子进程扫描期间持续上报 partial 响应，
+                // 每收到一行就刷新设备列表，直到不带 partial 标记的最终响应
+                while (true) {
+                    val resp = readResponse() ?: break
+                    val ok = jsonGetBool(resp, "ok") ?: false
+                    if (!ok) break
+                    if (isActive) {
+                        // 停止扫描后仍继续读完剩余响应（避免残留行错位），但不再刷新UI
+                        _scannedDevices.value = jsonParseDevices(resp)
+                    }
+                    if (jsonGetBool(resp, "partial") != true) break
                 }
-
-                _scannedDevices.value = jsonParseDevices(resp)
             } catch (_: Exception) {
             } finally {
                 if (_connectionState.value == BleConnectionState.SCANNING) {

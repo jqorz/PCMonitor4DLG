@@ -79,15 +79,13 @@ def run_async(coro):
 async def cmd_scan(params):
     timeout = params.get("timeout", 10)
     log(f"scan: timeout={timeout}")
-    # bleak 3.x: return_adv=True 返回 {address: (BLEDevice, AdvertisementData)}，
-    # 广播数据用于解析固件广播的版本号
-    devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
-    result = []
-    for d, ad in devices.values():
+    found = {}  # address -> 设备条目，detection_callback 持续补充/修正
+
+    def on_detection(d, ad):
         name = d.name or ad.local_name or ""
-        addr = d.address if d.address else ""
+        addr = d.address or ""
         if not addr:
-            continue
+            return
         entry = {"name": name, "address": addr}
         # 固件把 EPD_VERSION 低16位放进 0xFF 厂商AD（未含公司ID，见固件 user_peripheral.c），
         # 空中字节为 [版本号, 0x00]，bleak 解析为 company_id=版本号 + 空数据
@@ -95,9 +93,26 @@ async def cmd_scan(params):
             cid, payload = next(iter(ad.manufacturer_data.items()))
             if not payload and cid > 0 and (cid >> 8) == 0:
                 entry["version"] = cid & 0xFF
-        result.append(entry)
-    log(f"scan: found {len(result)} devices")
-    respond({"ok": True, "devices": result})
+        # 同一设备后续广播可能补全名称/版本，内容变化时覆盖
+        if found.get(addr) != entry:
+            found[addr] = entry
+
+    scanner = BleakScanner(detection_callback=on_detection)
+    await scanner.start()
+    try:
+        deadline = time.time() + timeout
+        last_snapshot = None
+        # 边扫描边上报：每0.3秒对比一次快照，有变化就发 partial 响应给 Kotlin 实时刷新
+        while time.time() < deadline:
+            await asyncio.sleep(0.3)
+            snapshot = list(found.values())
+            if snapshot != last_snapshot:
+                last_snapshot = snapshot
+                respond({"ok": True, "partial": True, "devices": snapshot})
+    finally:
+        await scanner.stop()
+    log(f"scan: found {len(found)} devices")
+    respond({"ok": True, "devices": list(found.values())})
 
 
 async def cmd_connect(params):

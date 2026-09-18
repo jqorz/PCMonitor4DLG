@@ -53,8 +53,41 @@ fun DevicePickerDialog(
 
                 HorizontalDivider()
 
-                // 设备列表
-                if (isScanning) {
+                // 设备列表：扫描中已有结果时同步显示，列表下方带扫描指示
+                if (devices.isNotEmpty()) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(devices) { device ->
+                                DeviceItem(
+                                    device = device,
+                                    isConnecting = connectionState == BleConnectionState.CONNECTING,
+                                    onClick = { onSelectDevice(device) }
+                                )
+                            }
+                        }
+                        if (isScanning) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "扫描中...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else if (isScanning) {
                     Box(
                         modifier = Modifier.fillMaxWidth().height(200.dp),
                         contentAlignment = Alignment.Center
@@ -65,26 +98,13 @@ fun DevicePickerDialog(
                             Text("正在扫描...", style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                } else if (devices.isEmpty()) {
+                } else {
                     Box(
                         modifier = Modifier.fillMaxWidth().height(200.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("未发现设备", style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(devices) { device ->
-                            DeviceItem(
-                                device = device,
-                                isConnecting = connectionState == BleConnectionState.CONNECTING,
-                                onClick = { onSelectDevice(device) }
-                            )
-                        }
                     }
                 }
             }
