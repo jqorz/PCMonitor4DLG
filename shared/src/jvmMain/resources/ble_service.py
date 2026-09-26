@@ -14,6 +14,8 @@ import time
 from bleak import BleakClient, BleakScanner
 
 SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb"
+GENERIC_ACCESS_SERVICE_UUID = "00001800-0000-1000-8000-00805f9b34fb"
+DEVICE_NAME_CHAR_UUID = "00002a00-0000-1000-8000-00805f9b34fb"
 
 client = None
 handle_to_uuid = {}
@@ -242,8 +244,29 @@ async def cmd_connect(params):
         # 成功！
         connected_address = address
         total_elapsed = time.time() - t0
-        log(f"CONNECT: success, {len(chars_map)} chars, {svc_count} services, {total_elapsed:.2f}s")
-        respond({"ok": True, "chars": chars_map})
+
+        # 读取 GAP Device Name(0x2A00)，随响应返回给上层显示；
+        # 否则按地址连接（自动重连）时上层只能显示 MAC 地址
+        device_name = None
+        try:
+            for service in services:
+                if service.uuid.lower() == GENERIC_ACCESS_SERVICE_UUID:
+                    for char in service.characteristics:
+                        if char.uuid.lower() == DEVICE_NAME_CHAR_UUID:
+                            data = await client.read_gatt_char(char)
+                            device_name = bytes(data).decode("utf-8", errors="replace").strip("\x00").strip()
+                            break
+                    if device_name:
+                        break
+        except Exception as e:
+            log(f"CONNECT: read device name failed: {e}")
+
+        log(f"CONNECT: success, {len(chars_map)} chars, {svc_count} services, "
+            f"{total_elapsed:.2f}s, name={device_name!r}")
+        resp = {"ok": True, "chars": chars_map}
+        if device_name:
+            resp["name"] = device_name
+        respond(resp)
         return
 
     # 所有重试都失败

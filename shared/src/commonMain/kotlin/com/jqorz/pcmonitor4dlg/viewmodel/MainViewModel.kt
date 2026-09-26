@@ -17,6 +17,9 @@ interface MainViewModel {
     // Settings
     val settings: StateFlow<AppSettings>
 
+    /** 应用版本号（来自构建脚本，"关于"显示用），读取失败时为 "dev" */
+    val appVersion: String
+
     // UI state
     val showSettingsDialog: StateFlow<Boolean>
     val showDevicePicker: StateFlow<Boolean>

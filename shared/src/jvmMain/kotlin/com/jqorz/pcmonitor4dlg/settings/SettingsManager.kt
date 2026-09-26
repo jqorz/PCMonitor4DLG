@@ -12,6 +12,7 @@ class SettingsManager {
         private const val KEY_AUTO_START = "auto_start_on_boot"
         private const val KEY_AUTO_CONNECT_LAST_DEVICE = "auto_connect_last_device"
         private const val KEY_LAST_DEVICE_ADDRESS = "last_device_address"
+        private const val KEY_LAST_DEVICE_NAME = "last_device_name"
         private const val KEY_LAST_DEVICE_VERSION = "last_device_version"
         private const val KEY_EXIT_ACTION = "exit_action"
         private const val KEY_DEVICE_THEME_DARK = "device_theme_dark"
@@ -34,8 +35,14 @@ class SettingsManager {
     }
 
     fun updateAutoStart(enabled: Boolean) {
+        if (enabled) {
+            // 只有打包后的启动器(PCMonitor.exe)能注册自启；开发环境(gradlew run/IDE)是 java.exe，无意义
+            val launcherExe = getLauncherExe() ?: return
+            if (!setAutoStartRegistry(true, launcherExe)) return
+        } else {
+            setAutoStartRegistry(false, "")
+        }
         prefs.putBoolean(KEY_AUTO_START, enabled)
-        setAutoStartRegistry(enabled)
         _settings.value = _settings.value.copy(autoStartOnBoot = enabled)
     }
 
@@ -51,6 +58,16 @@ class SettingsManager {
 
     fun saveLastDeviceAddress(address: String) {
         prefs.put(KEY_LAST_DEVICE_ADDRESS, address)
+    }
+
+    /** 上次成功连接设备的名称（与地址配对保存），供按地址重连时显示，避免闪现/长显 MAC */
+    fun getLastDeviceName(): String? {
+        val name = prefs.get(KEY_LAST_DEVICE_NAME, "")
+        return if (name == null || name == "") null else name
+    }
+
+    fun saveLastDeviceName(name: String) {
+        prefs.put(KEY_LAST_DEVICE_NAME, name)
     }
 
     /** 上次成功连接设备的固件版本号（与地址配对保存），0 表示未知 */
@@ -71,30 +88,31 @@ class SettingsManager {
         _settings.value = _settings.value.copy(exitAction = action)
     }
 
-    private fun setAutoStartRegistry(enable: Boolean) {
-        try {
-            val appPath = getApplicationPath()
-            val regCommand = if (enable) {
-                "reg add \"HKCU\\$REG_RUN_PATH\" /v \"$APP_NAME\" /t REG_SZ /d \"\\\"$appPath\\\"\" /f"
+    private fun setAutoStartRegistry(enable: Boolean, exePath: String): Boolean {
+        return try {
+            // 直接调 reg.exe，避免 cmd /c 拼接引号被二次解析
+            val command = if (enable) {
+                listOf(
+                    "reg", "add", "HKCU\\$REG_RUN_PATH",
+                    "/v", APP_NAME, "/t", "REG_SZ", "/d", "\"$exePath\"", "/f"
+                )
             } else {
-                "reg delete \"HKCU\\$REG_RUN_PATH\" /v \"$APP_NAME\" /f"
+                listOf("reg", "delete", "HKCU\\$REG_RUN_PATH", "/v", APP_NAME, "/f")
             }
-            Runtime.getRuntime().exec(arrayOf("cmd", "/c", regCommand)).waitFor()
+            val process = ProcessBuilder(command).start()
+            process.waitFor() == 0
         } catch (_: Exception) {
             // 注册表操作失败，忽略
+            false
         }
     }
 
-    private fun getApplicationPath(): String {
+    /** 打包后的启动器进程就是 PCMonitor.exe 本身；开发环境是 java.exe，返回 null */
+    private fun getLauncherExe(): String? {
         return try {
-            // 获取当前 jar/exe 的路径
-            val protectionDomain = SettingsManager::class.java.protectionDomain
-            val codeSource = protectionDomain.codeSource
-            codeSource.location.toURI().path.let {
-                if (it.startsWith("/")) it.substring(1) else it
-            }
+            ProcessHandle.current().info().command().orElse(null)
         } catch (_: Exception) {
-            System.getProperty("java.class.path") ?: "PCMonitor4DLG"
-        }
+            null
+        }?.takeIf { it.endsWith("pcmonitor.exe", ignoreCase = true) }
     }
 }

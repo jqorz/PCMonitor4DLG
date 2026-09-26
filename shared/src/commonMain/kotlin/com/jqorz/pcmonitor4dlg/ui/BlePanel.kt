@@ -1,5 +1,6 @@
 package com.jqorz.pcmonitor4dlg.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -7,9 +8,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,10 +30,10 @@ fun BlePanel(
     connectionState: BleConnectionState,
     deviceName: String,
     deviceVersion: Int = 0,
+    moreExpanded: Boolean = false,
     onClick: () -> Unit,
     onDisconnect: () -> Unit = {},
-    onUpgrade: () -> Unit = {},
-    onDeviceSettings: () -> Unit = {},
+    onMore: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val connected = connectionState == BleConnectionState.CONNECTED ||
@@ -124,17 +130,64 @@ fun BlePanel(
                 }
             }
 
-            // 操作按钮固定在右端
+            // 操作按钮固定在右端："更多"切换下方独立面板的展开，"断开"常驻
             if (connectionState == BleConnectionState.SERVICE_READY) {
-                TextButton(onClick = onDeviceSettings) {
-                    Text("设备设置")
-                }
-                TextButton(onClick = onUpgrade) {
-                    Text("升级")
+                TextButton(onClick = onMore) {
+                    Text(if (moreExpanded) "收起" else "更多")
                 }
                 TextButton(onClick = onDisconnect) {
                     Text("断开", color = MaterialTheme.colorScheme.error)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * "更多"展开的独立面板（显示在蓝牙状态栏下方）：深色模式切换 + 固件升级
+ */
+@Composable
+fun DeviceMorePanel(
+    themeDark: Boolean,
+    onThemeChanged: (Boolean) -> Unit,
+    onUpgrade: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 深色模式
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "深色模式",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = "性能监控屏配色：开启=黑底白字，关闭=白底黑字。切换立即生效，设备重启后保持",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Switch(checked = themeDark, onCheckedChange = onThemeChanged)
+            }
+
+            // 固件升级
+            TextButton(onClick = onUpgrade) {
+                Text("固件升级")
             }
         }
     }

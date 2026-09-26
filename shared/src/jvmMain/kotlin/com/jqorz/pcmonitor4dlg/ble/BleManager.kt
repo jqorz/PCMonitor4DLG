@@ -379,12 +379,13 @@ class BleManager {
     /**
      * 通过 MAC 地址直接连接设备，用于自动重连场景。
      * 连接成功后设备名称会从响应中获取；[version] 为持久化的固件版本号，0 表示未知。
+     * [cachedName] 为持久化的设备名，连接期间优先显示它，避免界面闪现 MAC 地址。
      */
-    fun connectByAddress(scope: CoroutineScope, address: String, version: Int = 0) {
+    fun connectByAddress(scope: CoroutineScope, address: String, version: Int = 0, cachedName: String = "") {
         stopScanAndWait() // 排空扫描响应流，避免连接命令的响应被错位消费
         disconnect()
         _connectionState.value = BleConnectionState.CONNECTING
-        _connectedDeviceName.value = address
+        _connectedDeviceName.value = cachedName.ifBlank { address }
         _connectedDeviceVersion.value = version
 
         scope.launch(Dispatchers.IO) {

@@ -13,6 +13,7 @@ import com.jqorz.pcmonitor4dlg.model.AppSettings
 @Composable
 fun SettingsDialog(
     settings: AppSettings,
+    appVersion: String = "dev",
     onAutoStartChanged: (Boolean) -> Unit,
     onAutoConnectLastDeviceChanged: (Boolean) -> Unit,
     onDismiss: () -> Unit
@@ -49,6 +50,33 @@ fun SettingsDialog(
                     checked = settings.autoConnectLastDevice,
                     onCheckedChange = onAutoConnectLastDeviceChanged
                 )
+
+                HorizontalDivider()
+
+                // 关于：应用名 + 版本号
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "关于",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "PCMonitor4DLG",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = "v$appVersion",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         confirmButton = {

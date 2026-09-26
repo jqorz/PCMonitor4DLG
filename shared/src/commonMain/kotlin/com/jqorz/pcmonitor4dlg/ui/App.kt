@@ -39,8 +39,8 @@ fun App(
     val showBluetoothOffDialog by viewModel.showBluetoothOffDialog.collectAsState()
 
     var filterDlg by remember { mutableStateOf(true) }
-    // 设备设置抽屉展开状态（纯UI状态；断开连接时由可见条件自动收起）
-    var showDeviceSettings by remember { mutableStateOf(false) }
+    // "更多"独立面板展开状态（纯UI状态；断开连接时由可见条件自动收起）
+    var showMorePanel by remember { mutableStateOf(false) }
     val isScanning = connectionState == BleConnectionState.SCANNING
 
     MaterialTheme {
@@ -82,30 +82,31 @@ fun App(
                     connectionState = connectionState,
                     deviceName = connectedDeviceName,
                     deviceVersion = connectedDeviceVersion,
+                    moreExpanded = showMorePanel,
                     onClick = {
                         if (connectionState == BleConnectionState.DISCONNECTED) {
                             viewModel.setShowDevicePicker(true)
                         }
                     },
                     onDisconnect = { viewModel.disconnectDevice() },
-                    onUpgrade = {
-                        if (connectionState == BleConnectionState.SERVICE_READY) {
-                            viewModel.setShowOtaDialog(true)
-                        }
-                    },
-                    onDeviceSettings = { showDeviceSettings = !showDeviceSettings },
+                    onMore = { showMorePanel = !showMorePanel },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
 
-                // 设备设置抽屉：仅连接就绪时可展开，断开自动收起
+                // "更多"独立面板：仅连接就绪时显示，断开自动收起
                 AnimatedVisibility(
-                    visible = showDeviceSettings && connectionState == BleConnectionState.SERVICE_READY,
+                    visible = showMorePanel && connectionState == BleConnectionState.SERVICE_READY,
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
-                    DeviceSettingsPanel(
+                    DeviceMorePanel(
                         themeDark = settings.deviceThemeDark,
                         onThemeChanged = { viewModel.updateDeviceTheme(it) },
+                        onUpgrade = {
+                            if (connectionState == BleConnectionState.SERVICE_READY) {
+                                viewModel.setShowOtaDialog(true)
+                            }
+                        },
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
                     )
                 }
@@ -152,6 +153,7 @@ fun App(
         if (showSettingsDialog) {
             SettingsDialog(
                 settings = settings,
+                appVersion = viewModel.appVersion,
                 onAutoStartChanged = { viewModel.updateAutoStart(it) },
                 onAutoConnectLastDeviceChanged = { viewModel.updateAutoConnectLastDevice(it) },
                 onDismiss = { viewModel.setShowSettingsDialog(false) }

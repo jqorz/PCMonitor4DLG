@@ -28,6 +28,16 @@ class MainViewModelImpl : MainViewModel {
 
     override val settings: StateFlow<AppSettings> = settingsManager.settings
 
+    /** 从构建时生成的 app.properties 读取（dev 运行/安装版均在 classpath 上），失败回退 "dev" */
+    override val appVersion: String by lazy {
+        runCatching {
+            this::class.java.classLoader.getResourceAsStream("app.properties")
+                ?.bufferedReader()?.readLines()
+                ?.firstOrNull { it.startsWith("app.version=") }
+                ?.substringAfter("app.version=")?.trim()
+        }.getOrNull() ?: "dev"
+    }
+
     private val _showSettingsDialog = MutableStateFlow(false)
     override val showSettingsDialog: StateFlow<Boolean> = _showSettingsDialog.asStateFlow()
 
@@ -73,6 +83,11 @@ class MainViewModelImpl : MainViewModel {
                     if (addr != null) {
                         settingsManager.saveLastDeviceAddress(addr)
                         if (ver != null && ver > 0) settingsManager.saveLastDeviceVersion(ver)
+                        // 持久化设备名（排除仍是 MAC 的情况），供下次按地址重连时显示
+                        val devName = bleManager.connectedDeviceName.value
+                        if (devName.isNotBlank() && !devName.equals(addr, ignoreCase = true)) {
+                            settingsManager.saveLastDeviceName(devName)
+                        }
                         pendingConnectAddress = null
                         pendingConnectVersion = null
                     }
@@ -95,8 +110,13 @@ class MainViewModelImpl : MainViewModel {
                     !bleManager.isOtaActive // OTA期间设备会主动断开重启，不要抢着重连
                 ) {
                     pendingConnectAddress = lastAddr
-                    // 版本号每次从设置读取，OTA 升级成功后无需重启应用即可显示新版本
-                    bleManager.connectByAddress(scope, lastAddr, settingsManager.getLastDeviceVersion())
+                    // 版本号/名称每次从设置读取，OTA 升级成功后无需重启应用即可显示新版本，
+                    // 名称用于连接期间显示，避免界面闪现 MAC 地址
+                    bleManager.connectByAddress(
+                        scope, lastAddr,
+                        settingsManager.getLastDeviceVersion(),
+                        settingsManager.getLastDeviceName() ?: ""
+                    )
                 }
                 // 等待连接结果或30秒后重试
                 val startTime = System.currentTimeMillis()
