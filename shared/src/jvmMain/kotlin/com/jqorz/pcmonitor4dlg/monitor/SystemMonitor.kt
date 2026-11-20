@@ -24,6 +24,11 @@ class SystemMonitor {
     private var prevBytesSent = 0L
     private var prevBytesRecv = 0L
     private var prevTimestamp = 0L
+
+    // 默认路由出口网卡缓存：只统计这一张网卡的流量，避免把 VMware/TAP/Wi-Fi 直连等
+    // 虚拟网卡的本地流量也算进"网速"（它们不受宽带带宽限制，会导致读数远超实际网速）
+    private var activeIfName: String? = null
+    private var activeIfCheckedAt = 0L
     private lateinit var prevCpuTicks: LongArray
 
     // 缓存 nvidia-smi 路径
@@ -55,8 +60,9 @@ class SystemMonitor {
         job = scope.launch(Dispatchers.IO) {
             // 在 IO 线程中初始化 OSHI，不阻塞主线程
             ensureInitialized()
-            prevBytesSent = getTotalBytesSent()
-            prevBytesRecv = getTotalBytesRecv()
+            val (initSent, initRecv) = snapshotNetTraffic()
+            prevBytesSent = initSent
+            prevBytesRecv = initRecv
             prevTimestamp = System.currentTimeMillis()
 
             // GPU 检测放到独立协程，不阻塞主循环
@@ -91,8 +97,7 @@ class SystemMonitor {
         val availMem = memory.available
         val memUsage = if (totalMem > 0) (totalMem - availMem).toDouble() / totalMem * 100.0 else 0.0
 
-        val currentSent = getTotalBytesSent()
-        val currentRecv = getTotalBytesRecv()
+        val (currentSent, currentRecv) = snapshotNetTraffic()
         val currentTime = System.currentTimeMillis()
         val elapsed = (currentTime - prevTimestamp).coerceAtLeast(1)
 
@@ -133,16 +138,49 @@ class SystemMonitor {
     private var lhmManager: Any? = null
     private var lhmFailed = false
 
-    private fun getTotalBytesSent(): Long {
-        var total = 0L
-        for (nif in hal.networkIFs) total += nif.bytesSent
-        return total
+    /**
+     * 解析默认路由实际使用的网卡名（如 "eth8"）。
+     * UDP connect 只在本地做路由选择、不发送任何数据包，
+     * 再用出口 IP 反查所属网卡；离线（无默认路由）时返回 null。
+     */
+    private fun resolveActiveIfName(): String? {
+        return try {
+            java.net.DatagramSocket().use { socket ->
+                socket.connect(java.net.InetAddress.getByName("8.8.8.8"), 53)
+                val local = socket.localAddress ?: return null
+                java.net.NetworkInterface.getByInetAddress(local)?.name
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    private fun getTotalBytesRecv(): Long {
-        var total = 0L
-        for (nif in hal.networkIFs) total += nif.bytesRecv
-        return total
+    /**
+     * 只统计默认路由网卡的累计收发字节数（sent to recv）。
+     * 不再把所有网卡加总：VMware/TAP/Wi-Fi 直连等虚拟网卡的本地流量
+     * 不走宽带，加总会导致显示的"网速"远超实际带宽。
+     * 每 30 秒或缓存网卡从系统中消失时重新解析一次。
+     */
+    private fun snapshotNetTraffic(): Pair<Long, Long> {
+        val now = System.currentTimeMillis()
+        val nifs = hal.networkIFs
+        var name = activeIfName
+        if (name == null || now - activeIfCheckedAt > 30_000 || nifs.none { it.name == name }) {
+            name = resolveActiveIfName()
+            activeIfCheckedAt = now
+            if (name != null) activeIfName = name
+        }
+        var sent = 0L
+        var recv = 0L
+        if (name != null) {
+            for (nif in nifs) {
+                if (nif.name == name) {
+                    sent += nif.bytesSent
+                    recv += nif.bytesRecv
+                }
+            }
+        }
+        return sent to recv
     }
 
     /**
