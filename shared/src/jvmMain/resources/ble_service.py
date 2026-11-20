@@ -91,6 +91,8 @@ async def cmd_scan(params):
         addr = d.address or ""
         if not addr:
             return
+        # 缓存BLEDevice对象供cmd_connect优先使用(Windows上连接更快)
+        ble_device_cache[addr] = (time.time(), d)
         prev = found.get(addr) or {}
         # 字段级合并：广播/扫描响应是两类事件，各自可能只带部分AD。
         # 设备对主动扫描会回空的SCAN_RSP——那种事件没有厂商数据但bleak会补缓存名，
@@ -169,7 +171,25 @@ async def cmd_connect(params):
 
     for attempt in range(max_retries):
         log(f"CONNECT: attempt {attempt + 1}/{max_retries}")
-        client = BleakClient(address, timeout=15.0, disconnected_callback=on_disconnect)
+
+        # 进程内服务表缓存: Windows的GATT全量发现是大头(1~5s)，重复连接同一设备时
+        # 传入已知服务集合可跳过发现(bleak的services参数, 仅Windows支持)。
+        # 旧bleak不支持该参数时TypeError自动退回常规连接。
+        cached_services = services_cache.get(address)
+        if cached_services:
+            log("CONNECT: using cached services (skip discovery)")
+
+        # 优先用近期扫描得到的BLEDevice对象连接(Windows上比裸地址快)
+        cached_dev = ble_device_cache.get(address)
+        connect_target = address
+        if cached_dev and time.time() - cached_dev[0] < 15:
+            connect_target = cached_dev[1]
+            log("CONNECT: using scanned BLEDevice object")
+        try:
+            client = BleakClient(connect_target, timeout=15.0, services=cached_services,
+                                 disconnected_callback=on_disconnect)
+        except TypeError:
+            client = BleakClient(connect_target, timeout=15.0, disconnected_callback=on_disconnect)
 
         t0 = time.time()
         try:
@@ -229,6 +249,10 @@ async def cmd_connect(params):
 
         if not found_service:
             log(f"CONNECT: service {SERVICE_UUID} NOT FOUND (scanned {svc_count} services)")
+            # 缓存的服务表可能已过期(固件GATT结构变更), 作废后重试走全量发现
+            if address in services_cache:
+                log("CONNECT: dropping stale services cache")
+                services_cache.pop(address, None)
             try:
                 await client.disconnect()
             except Exception:
@@ -241,7 +265,8 @@ async def cmd_connect(params):
                 await asyncio.sleep(wait)
             continue
 
-        # 成功！
+        # 成功！缓存服务表供下次连接跳过GATT发现
+        services_cache[address] = services
         connected_address = address
         total_elapsed = time.time() - t0
 
@@ -297,6 +322,16 @@ async def cmd_write(params):
     except Exception as e:
         log(f"WRITE: FAILED handle={handle} uuid={uuid} error={type(e).__name__}: {e}")
         respond({"ok": False, "error": f"Write failed: {type(e).__name__}: {e}"})
+
+
+# 连接服务表缓存: address -> BleakGATTServiceCollection
+# 子进程常驻, 重复连接同一设备时跳过GATT发现(见cmd_connect)
+services_cache = {}
+
+# 扫描捕获的BLEDevice对象缓存: address -> (时间戳, BLEDevice)
+# bleak在Windows上推荐用扫描结果对象连接(复用系统已解析的设备句柄),
+# 比裸地址连接快; 仅近期(15s内)扫描到的对象有效
+ble_device_cache = {}
 
 
 async def cmd_read(params):
