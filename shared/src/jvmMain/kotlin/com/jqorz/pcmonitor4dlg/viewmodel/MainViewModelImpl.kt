@@ -267,6 +267,14 @@ class MainViewModelImpl : MainViewModel {
                     running = false, progress = if (success) 100 else _otaInfo.value.progress,
                     resultMessage = message, success = success
                 )
+                if (success) {
+                    // 传输成功：设备已自行断开重启，稍候自动关闭弹窗
+                    // (停留片刻让100%进度被看到；失败时不关闭，保留弹窗供查看错误/重试)
+                    scope.launch {
+                        delay(800)
+                        _showOtaDialog.value = false
+                    }
+                }
             }
         )
     }

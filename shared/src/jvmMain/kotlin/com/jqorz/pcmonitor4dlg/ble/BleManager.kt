@@ -58,8 +58,8 @@ class BleManager {
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
 
-    // 复用的写缓冲区，避免每秒分配 ByteArray
-    private val writeBuffer = ByteArray(12)
+    // 复用的写缓冲区，避免每秒分配 ByteArray（0xB0数据帧13字节）
+    private val writeBuffer = ByteArray(13)
 
     // 主题命令缓冲区（0xB1，与数据同步的writeBuffer分开，避免并发写交错）
     private val themeBuffer = ByteArray(12)
@@ -448,13 +448,17 @@ class BleManager {
                 if (_connectionState.value == BleConnectionState.SERVICE_READY && !otaActive) {
                     try {
                         val stats = statsProvider()
-                        // 文档协议: Control Point (0xFF03), 命令字 0xB0, 12字节
+                        // 文档协议: Control Point (0xFF03), 命令字 0xB0, 13字节
+                        // [0]命令字 [1]CPU% [2]MEM% [3]GPU温度 [4]GPU占用
+                        // [5..8]上行网速 u32 LE(字节/秒) [9..12]下行网速 u32 LE
                         // 复用 writeBuffer，避免每秒分配新 ByteArray
                         writeBuffer[0] = 0xB0.toByte()
                         writeBuffer[1] = stats.cpuUsage.toInt().toByte()
                         writeBuffer[2] = stats.memUsage.toInt().toByte()
                         writeBuffer[3] = stats.gpuTemp.toInt().toByte()
                         writeBuffer[4] = stats.gpuUsage.toInt().toByte()
+                        putLe32(writeBuffer, 5, stats.netUpSpeed.toInt())
+                        putLe32(writeBuffer, 9, stats.netDownSpeed.toInt())
                         writeCharacteristic(ctrlPointAttrHandle, writeBuffer)
                     } catch (_: Exception) {
                     }
