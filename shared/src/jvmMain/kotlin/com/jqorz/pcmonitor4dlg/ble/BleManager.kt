@@ -2,6 +2,7 @@ package com.jqorz.pcmonitor4dlg.ble
 
 import com.jqorz.pcmonitor4dlg.model.BleConnectionState
 import com.jqorz.pcmonitor4dlg.model.BleDeviceInfo
+import com.jqorz.pcmonitor4dlg.model.DeviceThemeColors565
 import com.jqorz.pcmonitor4dlg.model.SystemStats
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +65,9 @@ class BleManager {
 
     // 主题命令缓冲区（0xB1，与数据同步的writeBuffer分开，避免并发写交错）
     private val themeBuffer = ByteArray(12)
+
+    // 自定义颜色命令缓冲区（0xB2: 命令字+bg/ink/accent各u16 LE）
+    private val customThemeBuffer = ByteArray(7)
 
     private var scanJob: Job? = null
     private var syncJob: Job? = null
@@ -528,12 +532,27 @@ class BleManager {
      * 设备端全屏重绘约1-2秒，期间链路由BLE中断维持，本次写的ACK由协议栈先行返回。
      * 未连接/句柄无效时静默跳过（设置已持久化，连接时会再同步一次）。
      */
-    fun sendTheme(dark: Boolean) {
+    fun sendTheme(id: Int) {
         if (ctrlPointAttrHandle == 0) return
         if (_connectionState.value != BleConnectionState.SERVICE_READY) return
-        themeBuffer[0] = 0xB1.toByte()
-        themeBuffer[1] = if (dark) 1 else 0
-        writeCharacteristic(ctrlPointAttrHandle, themeBuffer)
+        // 下发实际色值(0xB2 RGB565三元组)而非编号: 配色定义以PC端为准,
+        // 调色只需改PC; 设备flash存颜色, 固件内置表仅为无PC时的兜底默认
+        if (id in DeviceThemeColors565.indices) {
+            val (bg, ink, accent) = DeviceThemeColors565[id]
+            customThemeBuffer[0] = 0xB2.toByte()
+            customThemeBuffer[1] = (bg and 0xFF).toByte()
+            customThemeBuffer[2] = ((bg shr 8) and 0xFF).toByte()
+            customThemeBuffer[3] = (ink and 0xFF).toByte()
+            customThemeBuffer[4] = ((ink shr 8) and 0xFF).toByte()
+            customThemeBuffer[5] = (accent and 0xFF).toByte()
+            customThemeBuffer[6] = ((accent shr 8) and 0xFF).toByte()
+            writeCharacteristic(ctrlPointAttrHandle, customThemeBuffer)
+        } else {
+            // 兜底: 编号越界(旧设置迁移异常等), 用0xB1发预设号
+            themeBuffer[0] = 0xB1.toByte()
+            themeBuffer[1] = id.toByte()
+            writeCharacteristic(ctrlPointAttrHandle, themeBuffer)
+        }
     }
 
     // ---- OTA firmware upgrade ----
@@ -547,10 +566,21 @@ class BleManager {
     fun validateFirmware(path: String): Int {
         val firmBuf = java.io.File(path).readBytes()
         if (firmBuf.size < OTA_MIN_SIZE || firmBuf.size > OTA_MAX_SIZE) {
-            throw IllegalArgumentException(
-                "文件大小 ${firmBuf.size} 字节，超出OTA范围($OTA_MIN_SIZE~$OTA_MAX_SIZE)。\n" +
-                "请选择 tft_monitor_ota_*.bin（RAM运行版），不要选整刷镜像 fw_multi_part_spi.bin"
-            )
+            val name = path.substringAfterLast('/').substringAfterLast('\\')
+            val hint = if (firmBuf.size > OTA_MAX_SIZE) {
+                // 完整线刷镜像特征: 多分区SPI镜像开头是"AN-B-001"头, 且文件名不含_ota_
+                val fullImage = (firmBuf.size >= 8 && String(firmBuf, 0, 8, Charsets.US_ASCII) == "AN-B-001")
+                        || !name.contains("_ota_")
+                if (fullImage) {
+                    "\"$name\"(${firmBuf.size}字节)是完整线刷镜像，不能用于OTA。\n" +
+                    "请选择桌面上的 tft_monitor_ota_*.bin（约38KB，文件名带 _ota_）"
+                } else {
+                    "文件大小 ${firmBuf.size} 字节，超出OTA范围($OTA_MIN_SIZE~$OTA_MAX_SIZE)"
+                }
+            } else {
+                "文件过小(${firmBuf.size}字节)，可能不是固件文件"
+            }
+            throw IllegalArgumentException(hint)
         }
         val pos = findPattern(firmBuf, FIRMWARE_MAGIC)
             ?: throw IllegalArgumentException("无效固件文件：未找到版本魔数")

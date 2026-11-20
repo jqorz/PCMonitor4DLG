@@ -19,7 +19,7 @@ dependencies {
 }
 
 // 应用版本号单一来源：打包(packageVersion)与运行时"关于"显示都从这里取
-val appVersion = "1.0.2"
+val appVersion = "1.0.3"
 
 compose.desktop {
     application {

@@ -100,7 +100,7 @@ fun App(
                     exit = shrinkVertically() + fadeOut()
                 ) {
                     DeviceMorePanel(
-                        themeDark = settings.deviceThemeDark,
+                        themeId = settings.deviceThemeId,
                         onThemeChanged = { viewModel.updateDeviceTheme(it) },
                         onUpgrade = {
                             if (connectionState == BleConnectionState.SERVICE_READY) {

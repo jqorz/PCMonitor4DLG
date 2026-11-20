@@ -58,6 +58,7 @@ class MainViewModelImpl : MainViewModel {
 
     private var autoConnectJob: Job? = null
     private var pendingConnectAddress: String? = null
+    private var themeSendJob: Job? = null
 
     init {
         systemMonitor.start(scope)
@@ -67,7 +68,7 @@ class MainViewModelImpl : MainViewModel {
             bleManager.connectionState.collectLatest { state ->
                 if (state == BleConnectionState.SERVICE_READY) {
                     // 连接建立后先把本机主题设置同步给设备（设备端持久化，保持两边一致）
-                    bleManager.sendTheme(settings.value.deviceThemeDark)
+                    bleManager.sendTheme(settings.value.deviceThemeId)
                     bleManager.startDataSync(scope) { systemMonitor.stats.value }
                 }
             }
@@ -157,7 +158,10 @@ class MainViewModelImpl : MainViewModel {
     }
 
     override fun disconnectDevice() {
-        bleManager.disconnect()
+        // 断开命令同样有子进程/空中往返耗时, 移出主线程避免点击卡顿
+        scope.launch {
+            bleManager.disconnect()
+        }
     }
 
     override fun clearBleLog() {
@@ -178,10 +182,15 @@ class MainViewModelImpl : MainViewModel {
         }
     }
 
-    /** 切换设备主题：保存设置，已连接时立即下发0xB1（设备重绘并持久化） */
-    override fun updateDeviceTheme(dark: Boolean) {
-        settingsManager.updateDeviceTheme(dark)
-        bleManager.sendTheme(dark)
+    /** 切换设备主题：保存设置，已连接时立即下发（设备重绘并持久化）。
+     *  BLE发送必须移出主线程: 设备端处理主题命令需擦flash+整屏重绘(约150~250ms)
+     *  才回ACK, sendCommand同步等待会冻结UI; 连点时取消上次发送, 最后选择胜出 */
+    override fun updateDeviceTheme(id: Int) {
+        settingsManager.updateDeviceTheme(id)
+        themeSendJob?.cancel()
+        themeSendJob = scope.launch {
+            bleManager.sendTheme(id)
+        }
     }
 
     override fun updateExitAction(action: ExitAction) {

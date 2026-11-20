@@ -53,13 +53,15 @@
 #### 2.3.1 同步机制
 - 当蓝牙设备连接且服务就绪后，自动启动数据同步
 - 同步周期：**每 1 秒** 一次
-- 同步方式：向 Control Point (`0xFF03`) 写入 `0xB0` 命令 + 12 字节数据
-- 同步内容：CPU 占用率、内存占用率、GPU 温度、GPU 占用率（各占 1 字节，值域 0-100）
+- 同步方式：向 Control Point (`0xFF03`) 写入 `0xB0` 命令 + 13 字节数据（v2 帧）
+- 同步内容：CPU 占用率、内存占用率、GPU 温度、GPU 占用率（各 1 字节）+ 上行/下行网速（各 u32 LE，字节/秒）
+- 连接建立时先读 Long Value (0xFF01) 获取实际固件版本（初始值 `'V','E','R',版本号`，覆盖持久化缓存）
 
 #### 2.3.2 通信架构
 - 通信方式：BLE GATT
 - 实现方式：通过 Python 子进程 (`bleak` 库) 进行 BLE 操作，Kotlin 端通过 stdin/stdout JSON 命令与子进程交互
-- 支持的子进程命令：`scan`、`connect`、`disconnect_ble`、`write`、`exit`
+- 支持的子进程命令：`scan`、`connect`、`disconnect_ble`、`write`、`read`、`exit`
+- 连接加速：子进程内缓存 GATT 服务表（重复连接跳过发现）+ 复用扫描得到的 BLEDevice 对象
 - 参考实现：`DlgClockBle` 项目的 [BleManager.kt](../../Coding/DlgClockBle/app/src/main/java/com/xmhzj/dlgclockble/BleManager.kt)
 
 **GATT 服务与特征值：**
@@ -82,7 +84,9 @@
 | `0xA2`  | 固件升级-页前半 | 136 字节：镜像数据128B 位于 buf[8..135]，首包带64B镜像头   |
 | `0xA3`  | 固件升级-页后半 | 136 字节：镜像数据128B，收到后提交256B flash页             |
 | `0xA4`  | 固件升级-结束   | 136 字节（新固件收到最后一页即自行断开重启，0xA4可丢）       |
-| `0xB0`  | PC 状态数据同步 | 12 字节：CPU占用(1B)+内存占用(1B)+GPU温度(1B)+GPU占用(1B)+保留(8B) 写入 Control Point (0xFF03) |
+| `0xB0`  | PC 状态数据同步 | 13 字节：CPU占用(1B)+内存占用(1B)+GPU温度(1B)+GPU占用(1B)+上行网速(u32 LE)+下行网速(u32 LE) 写入 Control Point (0xFF03) |
+| `0xB1`  | 预设主题切换 | 主题号(1B, 0~7) 写入 Control Point (0xFF03) |
+| `0xB2`  | 自定义主题颜色 | 背景/文字/强调色(各 u16 LE, RGB565) 写入 Control Point (0xFF03)；**PC端选择主题时实际下发此命令**，配色以PC端为权威 |
 
 ### 2.4 OTA固件升级
 

@@ -1,6 +1,7 @@
 package com.jqorz.pcmonitor4dlg.settings
 
 import com.jqorz.pcmonitor4dlg.model.AppSettings
+import com.jqorz.pcmonitor4dlg.model.DeviceThemeNames
 import com.jqorz.pcmonitor4dlg.model.ExitAction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,7 +16,8 @@ class SettingsManager {
         private const val KEY_LAST_DEVICE_NAME = "last_device_name"
         private const val KEY_LAST_DEVICE_VERSION = "last_device_version"
         private const val KEY_EXIT_ACTION = "exit_action"
-        private const val KEY_DEVICE_THEME_DARK = "device_theme_dark"
+        private const val KEY_DEVICE_THEME_ID = "device_theme_id"
+        private const val KEY_DEVICE_THEME_DARK = "device_theme_dark" // 旧版布尔设置, 仅迁移读取
         private const val REG_RUN_PATH = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
         private const val APP_NAME = "PCMonitor4DLG"
     }
@@ -29,7 +31,15 @@ class SettingsManager {
         return AppSettings(
             autoStartOnBoot = prefs.getBoolean(KEY_AUTO_START, false),
             autoConnectLastDevice = prefs.getBoolean(KEY_AUTO_CONNECT_LAST_DEVICE, false),
-            deviceThemeDark = prefs.getBoolean(KEY_DEVICE_THEME_DARK, true),
+            // 主题号；无记录时迁移旧版深/浅布尔设置（深→0黑·琥珀 浅→6白·砖红）
+            deviceThemeId = run {
+                val id = prefs.getInt(KEY_DEVICE_THEME_ID, -1)
+                when {
+                    id in DeviceThemeNames.indices -> id
+                    prefs.getBoolean(KEY_DEVICE_THEME_DARK, true) -> 0
+                    else -> 6
+                }
+            },
             exitAction = ExitAction.entries[prefs.getInt(KEY_EXIT_ACTION, ExitAction.ASK.ordinal)]
         )
     }
@@ -77,10 +87,10 @@ class SettingsManager {
         prefs.putInt(KEY_LAST_DEVICE_VERSION, version)
     }
 
-    /** 设备主题：true=深色(黑底白字) false=浅色(白底黑字)，连接时同步给设备(0xB1) */
-    fun updateDeviceTheme(dark: Boolean) {
-        prefs.putBoolean(KEY_DEVICE_THEME_DARK, dark)
-        _settings.value = _settings.value.copy(deviceThemeDark = dark)
+    /** 设备主题号(0..8, 见固件themes[]表)，连接时同步给设备(0xB1) */
+    fun updateDeviceTheme(id: Int) {
+        prefs.putInt(KEY_DEVICE_THEME_ID, id)
+        _settings.value = _settings.value.copy(deviceThemeId = id)
     }
 
     fun updateExitAction(action: ExitAction) {
