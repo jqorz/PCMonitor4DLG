@@ -299,6 +299,28 @@ async def cmd_write(params):
         respond({"ok": False, "error": f"Write failed: {type(e).__name__}: {e}"})
 
 
+async def cmd_read(params):
+    global client
+    if not client or not client.is_connected:
+        log("READ: not connected")
+        respond({"ok": False, "error": "Not connected"})
+        return
+
+    uuid = handle_to_uuid.get(params["handle"])
+    if not uuid:
+        log(f"READ: unknown handle={params['handle']}")
+        respond({"ok": False, "error": f"Unknown handle: {params['handle']}"})
+        return
+
+    try:
+        data = await client.read_gatt_char(uuid)
+        log(f"READ: ok uuid={uuid} len={len(data)}")
+        respond({"ok": True, "data": base64.b64encode(data).decode()})
+    except Exception as e:
+        log(f"READ: FAILED uuid={uuid} error={type(e).__name__}: {e}")
+        respond({"ok": False, "error": f"Read failed: {type(e).__name__}: {e}"})
+
+
 async def cmd_disconnect_ble(params):
     global client, handle_to_uuid, connected_address
     log(f"disconnect_ble: connected={client.is_connected if client else 'N/A'}")
@@ -351,6 +373,8 @@ def main():
                 run_async(cmd_connect(cmd))
             elif cmd_name == "write":
                 run_async(cmd_write(cmd))
+            elif cmd_name == "read":
+                run_async(cmd_read(cmd))
             elif cmd_name == "disconnect_ble":
                 run_async(cmd_disconnect_ble(cmd))
             elif cmd_name == "exit":

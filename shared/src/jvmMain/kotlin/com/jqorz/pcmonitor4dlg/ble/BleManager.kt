@@ -37,6 +37,7 @@ class BleManager {
 
         // 缓存 Base64 编码器
         private val BASE64_ENCODER = java.util.Base64.getEncoder()
+        private val BASE64_DECODER = java.util.Base64.getDecoder()
     }
 
     /** 日志开关，默认关闭以减少内存分配，需要调试时设为 true */
@@ -321,6 +322,36 @@ class BleManager {
         }
     }
 
+    /**
+     * 连接建立后从 Long Value(0xFF01) 读取实际固件版本。
+     * 固件把初始值设为 'V''E''R'+版本号(u8)；直连场景广播不可见(连接后设备
+     * 停止广播)，持久化缓存在线刷/降级后会过期，以此读取为准。
+     * 旧固件(无此初始值)或读取失败时保持原值不覆盖，单次读约几十毫秒。
+     */
+    private fun readDeviceVersion() {
+        if (longValueAttrHandle == 0) return
+        val resp = try {
+            sendCommand("""{"cmd":"read","handle":$longValueAttrHandle}""")
+        } catch (_: Exception) {
+            null
+        } ?: return
+        if (jsonGetBool(resp, "ok") != true) return
+        val bytes = try {
+            BASE64_DECODER.decode(jsonGetString(resp, "data") ?: return)
+        } catch (_: Exception) {
+            return
+        }
+        if (bytes.size >= 4 &&
+            bytes[0] == 'V'.code.toByte() && bytes[1] == 'E'.code.toByte() && bytes[2] == 'R'.code.toByte()
+        ) {
+            val v = bytes[3].toInt() and 0xFF
+            if (v > 0 && v != _connectedDeviceVersion.value) {
+                addLog("device version via GATT: v$v (was v${_connectedDeviceVersion.value})")
+                _connectedDeviceVersion.value = v
+            }
+        }
+    }
+
     // ---- Connection ----
 
     fun connect(scope: CoroutineScope, device: BleDeviceInfo) {
@@ -369,6 +400,9 @@ class BleManager {
                     return@launch
                 }
 
+                // 读取实际固件版本(覆盖扫描广播值), 旧固件无此初始值则保持
+                readDeviceVersion()
+
                 _connectionState.value = BleConnectionState.SERVICE_READY
             } catch (_: Exception) {
                 _connectionState.value = BleConnectionState.DISCONNECTED
@@ -378,7 +412,9 @@ class BleManager {
 
     /**
      * 通过 MAC 地址直接连接设备，用于自动重连场景。
-     * 连接成功后设备名称会从响应中获取；[version] 为持久化的固件版本号，0 表示未知。
+     * 连接成功后设备名称会从响应中获取；[version] 为持久化的固件版本号，
+     * 仅作连接期间的初始显示，SERVICE_READY前会经Long Value(0xFF01)读取
+     * 实际版本覆盖(见readDeviceVersion)，线刷/降级后不会残留旧值。
      * [cachedName] 为持久化的设备名，连接期间优先显示它，避免界面闪现 MAC 地址。
      */
     fun connectByAddress(scope: CoroutineScope, address: String, version: Int = 0, cachedName: String = "") {
@@ -431,6 +467,9 @@ class BleManager {
                     _connectionState.value = BleConnectionState.DISCONNECTED
                     return@launch
                 }
+
+                // 读取实际固件版本覆盖持久化缓存(线刷/降级后不残留旧值), 旧固件保持缓存
+                readDeviceVersion()
 
                 _connectionState.value = BleConnectionState.SERVICE_READY
             } catch (_: Exception) {

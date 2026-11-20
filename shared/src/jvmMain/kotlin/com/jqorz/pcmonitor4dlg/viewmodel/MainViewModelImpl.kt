@@ -58,7 +58,6 @@ class MainViewModelImpl : MainViewModel {
 
     private var autoConnectJob: Job? = null
     private var pendingConnectAddress: String? = null
-    private var pendingConnectVersion: Int? = null
 
     init {
         systemMonitor.start(scope)
@@ -79,17 +78,19 @@ class MainViewModelImpl : MainViewModel {
             bleManager.connectionState.collectLatest { state ->
                 if (state == BleConnectionState.SERVICE_READY) {
                     val addr = pendingConnectAddress
-                    val ver = pendingConnectVersion
                     if (addr != null) {
                         settingsManager.saveLastDeviceAddress(addr)
-                        if (ver != null && ver > 0) settingsManager.saveLastDeviceVersion(ver)
+                        // 版本取当前显示值: 直连路径来自连接前的广播探测(实测),
+                        // 扫描选择路径来自广播解析, OTA路径来自固件文件——均为真值,
+                        // 线刷/降级后缓存随之自动修正
+                        val ver = bleManager.connectedDeviceVersion.value
+                        if (ver > 0) settingsManager.saveLastDeviceVersion(ver)
                         // 持久化设备名（排除仍是 MAC 的情况），供下次按地址重连时显示
                         val devName = bleManager.connectedDeviceName.value
                         if (devName.isNotBlank() && !devName.equals(addr, ignoreCase = true)) {
                             settingsManager.saveLastDeviceName(devName)
                         }
                         pendingConnectAddress = null
-                        pendingConnectVersion = null
                     }
                 }
             }
@@ -152,7 +153,6 @@ class MainViewModelImpl : MainViewModel {
 
     override fun connectDevice(device: BleDeviceInfo) {
         pendingConnectAddress = device.address
-        pendingConnectVersion = device.version.takeIf { it > 0 }
         bleManager.connect(scope, device)
     }
 
